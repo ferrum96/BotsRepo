@@ -1,0 +1,17 @@
+/Users/konstantin/Library/Python/3.9/lib/python/site-packages/google/auth/__init__.py:54: FutureWarning: You are using a Python version 3.9 past its end of life. Google will update google-auth with critical bug fixes on a best-effort basis, but not with any other fixes or features. Please upgrade your Python version, and then update google-auth.
+  warnings.warn(eol_message.format("3.9"), FutureWarning)
+/Users/konstantin/Library/Python/3.9/lib/python/site-packages/google/oauth2/__init__.py:40: FutureWarning: You are using a Python version 3.9 past its end of life. Google will update google-auth with critical bug fixes on a best-effort basis, but not with any other fixes or features. Please upgrade your Python version, and then update google-auth.
+  warnings.warn(eol_message.format("3.9"), FutureWarning)
+/Users/konstantin/Library/Python/3.9/lib/python/site-packages/urllib3/__init__.py:35: NotOpenSSLWarning: urllib3 v2 only supports OpenSSL 1.1.1+, currently the 'ssl' module is compiled with 'LibreSSL 2.8.3'. See: https://github.com/urllib3/urllib3/issues/3020
+  warnings.warn(
+2026-06-16 23:23:11,941 - INFO - Инициализация Google Sheets...
+2026-06-16 23:23:15,096 - INFO - ✅ Google Sheets подключены!
+2026-06-16 23:23:15,096 - INFO - Запуск бота канала «Дети и Желания»...
+2026-06-16 23:23:15,096 - INFO - Start polling
+2026-06-16 23:23:17,950 - INFO - Run polling for bot @fkandu_manager_bot id=8765369453 - 'Дети и Желания (менеджер)'
+2026-06-16 23:23:49,874 - INFO - Update id=501987163 is handled. Duration 415 ms by bot id=8765369453
+2026-06-16 23:24:05,763 - INFO - Update id=501987164 is handled. Duration 219 ms by bot id=8765369453
+2026-06-16 23:25:03,517 - INFO - Update id=501987165 is handled. Duration 164 ms by bot id=8765369453
+2026-06-16 23:25:05,903 - INFO - Update id=501987166 is handled. Duration 235 ms by bot id=8765369453
+2026-06-16 23:25:11,537 - INFO - Лид 176585475 сохранен в Google Sheets
+2026-06-16 23:25:11,842 - INFO - Update id=501987167 is handled. Duration 1219 ms by bot id=8765369453
