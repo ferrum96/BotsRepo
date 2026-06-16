@@ -207,7 +207,7 @@ async def process_timeline(callback: CallbackQuery, state: FSMContext):
 
     if gsheet:
         try:
-            username = f"@{user.username}" if user.username else "Нет username"
+            username = f"https://t.me/{user.username}" if user.username else "Нет username"
             await asyncio.to_thread(gsheet.append_row, [
                 datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                 username,
@@ -232,11 +232,14 @@ async def process_timeline(callback: CallbackQuery, state: FSMContext):
     await state.clear()
 
     admin_msg = (
-        f"<b>НОВАЯ ЗАЯВКА НА РЕКЛАМУ</b>\n\n"
+        f"{score} <b>НОВАЯ ЗАЯВКА НА РЕКЛАМУ</b>\n\n"
+        f"👤 <b>От:</b> {user.full_name} ({f'@{user.username}' if user.username else 'нет username'})\n"
         f"📦 <b>Категория:</b> {data['category']}\n"
         f"📝 <b>О товаре:</b>\n<i>{data.get('product_info', '—')}</i>\n\n"
         f"💰 <b>Бюджет:</b> {data['budget']}\n"
-        f"📅 <b>Сроки:</b> {timeline_text}"
+        f"📅 <b>Сроки:</b> {timeline_text}\n\n"
+        f"📊 <b>Оценка:</b> {score}\n\n"
+        f"💬 <a href='https://t.me/{user.username}'>Написать в ЛС</a>"
     )
     try:
         await bot.send_message(ADMIN_ID, admin_msg, parse_mode="HTML", disable_web_page_preview=True)
