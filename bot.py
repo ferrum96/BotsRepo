@@ -4,7 +4,6 @@ import asyncio
 from datetime import datetime
 
 from aiogram import Bot, Dispatcher, Router, F
-from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram.types import (
     Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 )
@@ -34,33 +33,6 @@ SCOPES = [
     'https://www.googleapis.com/auth/drive.file',
 ]
 SHEET_HEADERS = ["Дата", "Username", "Имя", "Категория", "О товаре", "Бюджет", "Сроки", "Оценка лида"]
-
-CATEGORIES = {
-    "cat_clothes": "👗 Одежда и обувь",
-    "cat_accessories": "🎒 Аксессуары",
-    "cat_care": "🧴 Уход и гигиена",
-    "cat_leisure": "🌊 Отдых и активности",
-    "cat_edu": "🎨 Развитие и творчество",
-    "cat_food": "🍼 Питание",
-    "cat_events": "🎉 Досуг и мероприятия",
-    "cat_app": "📱 Сервисы/приложения для мам",
-    "cat_drive": "Игрушки - машинки",
-    "cat_other": "📋 Другое",
-}
-
-BUDGETS = {
-    "bud_10": "До 10 000 ₽",
-    "bud_30": "10 000 - 30 000 ₽",
-    "bud_50": "30 000 - 50 000 ₽",
-    "bud_50plus": "50 000 ₽ и выше",
-}
-
-TIMELINES = {
-    "time_week": "На этой неделе",
-    "time_2weeks": "В ближайшие 2 недели",
-    "time_month": "В следующем месяце",
-    "time_just_looking": "Просто изучаю варианты",
-}
 
 gsheet = None
 
@@ -112,31 +84,56 @@ def make_keyboard(items: list[tuple[str, str]]) -> InlineKeyboardMarkup:
     ])
 
 
+BACK_BTN = InlineKeyboardButton(text="🔙 Назад", callback_data="back")
+
+
+def make_keyboard_with_back(items: list[tuple[str, str]]) -> InlineKeyboardMarkup:
+    kb = make_keyboard(items)
+    kb.inline_keyboard.append([BACK_BTN])
+    return kb
+
+
+CATEGORIES = {
+    "cat_clothes": "👗 Детская одежда и обувь",
+    "cat_accessories": "🎒 Аксессуары (сумки, рюкзаки)",
+    "cat_care": "🧴 Уход и гигиена",
+    "cat_leisure": "🌊 Отдых и активности",
+    "cat_edu": "🎨 Развитие и творчество",
+    "cat_food": "🍼 Питание",
+    "cat_events": "🎉 Досуг и мероприятия",
+    "cat_app": "📱 Сервисы/приложения для мам",
+    "cat_other": "📋 Другое",
+}
+
+BUDGETS = {
+    "bud_10": "До 10 000 ₽",
+    "bud_30": "10 000 - 30 000 ₽",
+    "bud_50": "30 000 - 50 000 ₽",
+    "bud_50plus": "50 000 ₽ и выше",
+}
+
+TIMELINES = {
+    "time_week": "⚡ На этой неделе",
+    "time_2weeks": "📅 В ближайшие 2 недели",
+    "time_month": "🗓 В следующем месяце",
+    "time_just_looking": "👀 Просто изучаю варианты",
+}
+
 CATEGORY_KB = make_keyboard([
-    ("👗 Детская одежда и обувь", "cat_clothes"),
-    ("🎒 Аксессуары (сумки, рюкзаки)", "cat_accessories"),
-    ("🧴 Уход и гигиена", "cat_care"),
-    ("🌊 Отдых и активности", "cat_leisure"),
-    ("🎨 Развитие и творчество", "cat_edu"),
-    ("🍼 Питание", "cat_food"),
-    ("🎉 Досуг и мероприятия", "cat_events"),
-    ("📱 Сервисы/приложения для мам", "cat_app"),
-    ("📋 Другое", "cat_other"),
+    (text, data) for data, text in CATEGORIES.items()
 ])
 
-BUDGET_KB = make_keyboard([
-    ("До 10 000 ₽", "bud_10"),
-    ("10 000 - 30 000 ₽", "bud_30"),
-    ("30 000 - 50 000 ₽", "bud_50"),
-    ("50 000 ₽ и выше", "bud_50plus"),
+BUDGET_KB = make_keyboard_with_back([
+    (text, data) for data, text in BUDGETS.items()
 ])
 
-TIMELINE_KB = make_keyboard([
-    ("⚡ На этой неделе", "time_week"),
-    ("📅 В ближайшие 2 недели", "time_2weeks"),
-    ("🗓 В следующем месяце", "time_month"),
-    ("👀 Просто изучаю варианты", "time_just_looking"),
+TIMELINE_KB = make_keyboard_with_back([
+    (text, data) for data, text in TIMELINES.items()
 ])
+
+BACK_ONLY_KB = make_keyboard([("🔙 Назад", "back")])
+
+NEW_REQUEST_KB = make_keyboard([("📝 Новая заявка", "new_request")])
 
 
 @router.message(CommandStart())
@@ -165,6 +162,7 @@ async def process_category(callback: CallbackQuery, state: FSMContext):
         f"Принято: <b>{cat_name}</b> ✅\n\n"
         "<b>2. Расскажите коротко о товаре:</b>\n"
         "(Можно ссылку на сайт или карточку товара)",
+        reply_markup=BACK_ONLY_KB,
         parse_mode="HTML",
     )
     await state.set_state(LeadForm.product_info)
@@ -227,13 +225,14 @@ async def process_timeline(callback: CallbackQuery, state: FSMContext):
         "Спасибо за заявку! 🌸\n\n"
         "Я передала информацию админу канала «Дети и Желания». "
         "Она изучит ваш продукт и напишет вам в течение дня. 🤗",
+        reply_markup=NEW_REQUEST_KB,
         parse_mode="HTML",
     )
     await callback.answer()
     await state.clear()
 
     admin_msg = (
-        f"{score} <b>НОВАЯ ЗАЯВКА НА РЕКЛАМУ</b>\n\n"
+        f"<b>НОВАЯ ЗАЯВКА НА РЕКЛАМУ</b>\n\n"
         f"👤 <b>От:</b> {user.full_name} ({f'@{user.username}' if user.username else 'нет username'})\n"
         f"📦 <b>Категория:</b> {data['category']}\n"
         f"📝 <b>О товаре:</b>\n<i>{data.get('product_info', '—')}</i>\n\n"
@@ -246,6 +245,57 @@ async def process_timeline(callback: CallbackQuery, state: FSMContext):
         await bot.send_message(ADMIN_ID, admin_msg, parse_mode="HTML", disable_web_page_preview=True)
     except Exception as e:
         logging.error(f"Ошибка отправки админу: {e}")
+
+
+@router.callback_query(F.data == "back", LeadForm.product_info)
+async def back_from_product_info(callback: CallbackQuery, state: FSMContext):
+    await callback.message.edit_text(
+        "Чтобы я поняла, подходит ли ваш продукт нашему каналу, ответьте на "
+        "несколько вопросов:\n\n"
+        "<b>1. К какой рубрике относится ваш продукт?</b>",
+        reply_markup=CATEGORY_KB,
+        parse_mode="HTML",
+    )
+    await state.set_state(LeadForm.category)
+    await callback.answer()
+
+
+@router.callback_query(F.data == "back", LeadForm.budget)
+async def back_from_budget(callback: CallbackQuery, state: FSMContext):
+    await state.set_state(LeadForm.product_info)
+    await callback.message.edit_text(
+        "<b>2. Расскажите коротко о товаре:</b>\n"
+        "(Можно ссылку на сайт или карточку товара)",
+        reply_markup=BACK_ONLY_KB,
+        parse_mode="HTML",
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "back", LeadForm.timeline)
+async def back_from_timeline(callback: CallbackQuery, state: FSMContext):
+    await callback.message.edit_text(
+        "<b>3. Какой бюджет на размещение?</b>",
+        reply_markup=BUDGET_KB,
+        parse_mode="HTML",
+    )
+    await state.set_state(LeadForm.budget)
+    await callback.answer()
+
+
+@router.callback_query(F.data == "new_request")
+async def new_request(callback: CallbackQuery, state: FSMContext):
+    await state.clear()
+    await callback.message.edit_text(
+        "Привет! 🌸\n\n"
+        "Чтобы я поняла, подходит ли ваш продукт нашему каналу, ответьте на "
+        "несколько вопросов:\n\n"
+        "<b>1. К какой рубрике относится ваш продукт?</b>",
+        reply_markup=CATEGORY_KB,
+        parse_mode="HTML",
+    )
+    await state.set_state(LeadForm.category)
+    await callback.answer()
 
 
 async def main():
