@@ -1,25 +1,26 @@
 import os
+import sqlite3
 import logging
 import asyncio
-from datetime import datetime
+from aiohttp import web
 
 from aiogram import Bot, Dispatcher, Router, F
 from aiogram.types import (
-    Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
+    Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery,
 )
 from aiogram.filters import CommandStart
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
 
-import gspread
-from google.oauth2.service_account import Credentials
 from dotenv import load_dotenv
 
-load_dotenv()
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+load_dotenv(os.path.join(BASE_DIR, ".env"))
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_ID = int(os.getenv("ADMIN_ID"))
-SPREADSHEET_ID = os.getenv("SPREADSHEET_ID")
+HOSTNAME = os.getenv("HOSTNAME", "localhost")
+FILE_SERVER_PORT = 8088
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
@@ -28,28 +29,69 @@ dp = Dispatcher(storage=MemoryStorage())
 router = Router()
 dp.include_router(router)
 
-SCOPES = [
-    'https://www.googleapis.com/auth/spreadsheets',
-    'https://www.googleapis.com/auth/drive.file',
-]
-SHEET_HEADERS = ["Дата", "Username", "Имя", "Категория", "О товаре", "Бюджет", "Сроки", "Оценка лида"]
+DB_PATH = os.path.join(BASE_DIR, "db", "leads.db")
+db = sqlite3.connect(DB_PATH, check_same_thread=False)
+db.execute("""
+    CREATE TABLE IF NOT EXISTS files (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        filename TEXT NOT NULL,
+        mime_type TEXT NOT NULL,
+        data BLOB NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+""")
+db.execute("""
+    CREATE TABLE IF NOT EXISTS leads (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL,
+        username TEXT,
+        full_name TEXT,
+        category TEXT,
+        product_info TEXT,
+        budget TEXT,
+        timeline TEXT,
+        lead_score TEXT,
+        status TEXT DEFAULT '🆕 Новая',
+        admin_comment TEXT DEFAULT '',
+        next_contact TEXT,
+        deal_amount INTEGER DEFAULT 0,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+""")
+db.commit()
 
-gsheet = None
+
+def db_save_file(file_bytes: bytes, filename: str, mime_type: str) -> int:
+    cur = db.execute(
+        "INSERT INTO files (filename, mime_type, data) VALUES (?, ?, ?)",
+        (filename, mime_type, file_bytes),
+    )
+    db.commit()
+    return cur.lastrowid
 
 
-def get_google_sheet():
-    try:
-        creds = Credentials.from_service_account_file('credentials.json', scopes=SCOPES)
-        client = gspread.authorize(creds)
-        sheet = client.open_by_key(SPREADSHEET_ID).sheet1
-        if sheet.row_values(1) != SHEET_HEADERS:
-            if sheet.row_values(1):
-                sheet.delete_rows(1)
-            sheet.insert_row(SHEET_HEADERS, 1)
-        return sheet
-    except Exception as e:
-        logging.error(f"Ошибка подключения к Google Sheets: {e}")
-        return None
+def db_get_file(file_id: int):
+    return db.execute(
+        "SELECT filename, mime_type, data FROM files WHERE id = ?", (file_id,)
+    ).fetchone()
+
+
+async def handle_file(request: web.Request) -> web.Response:
+    file_id = int(request.match_info['file_id'])
+    row = db_get_file(file_id)
+    if not row:
+        return web.Response(status=404, text="Not found")
+    filename, mime_type, data = row
+    return web.Response(
+        body=data,
+        content_type=mime_type,
+        headers={"Content-Disposition": f'inline; filename="{filename}"'},
+    )
+
+
+def get_file_url(file_id: int) -> str:
+    return f"http://{HOSTNAME}:{FILE_SERVER_PORT}/files/{file_id}"
 
 
 class LeadForm(StatesGroup):
@@ -133,6 +175,11 @@ TIMELINE_KB = make_keyboard_with_back([
 
 BACK_ONLY_KB = make_keyboard([("🔙 Назад", "back")])
 
+ADD_MORE_KB = InlineKeyboardMarkup(inline_keyboard=[
+    [InlineKeyboardButton(text="📎 Ещё файл", callback_data="add_more_file")],
+    [InlineKeyboardButton(text="✅ Далее", callback_data="finish_product")],
+])
+
 NEW_REQUEST_KB = make_keyboard([("📝 Новая заявка", "new_request")])
 
 
@@ -161,7 +208,7 @@ async def process_category(callback: CallbackQuery, state: FSMContext):
     await callback.message.edit_text(
         f"Принято: <b>{cat_name}</b> ✅\n\n"
         "<b>2. Расскажите коротко о товаре:</b>\n"
-        "(Можно ссылку на сайт или карточку товара)",
+        "(Можно ссылку на сайт, карточку товара или загрузить документ/фото)",
         reply_markup=BACK_ONLY_KB,
         parse_mode="HTML",
     )
@@ -171,14 +218,97 @@ async def process_category(callback: CallbackQuery, state: FSMContext):
 
 @router.message(LeadForm.product_info)
 async def process_product_info(message: Message, state: FSMContext):
-    await state.update_data(product_info=message.text)
+    data = await state.get_data()
+    existing = data.get("product_info", "")
+
+    if message.document:
+        doc_name = message.document.file_name
+        caption = message.caption or ""
+        mime = message.document.mime_type or "application/octet-stream"
+
+        file_info = await bot.get_file(message.document.file_id)
+        file_bytes = await bot.download_file(file_info.file_path)
+        file_content = file_bytes.read()
+
+        file_id = db_save_file(file_content, doc_name, mime)
+        file_url = get_file_url(file_id)
+        part = f"📎 [{doc_name}]({file_url})"
+        if caption:
+            part += f"\n{caption}"
+    elif message.photo:
+        photo = message.photo[-1]
+        file_info = await bot.get_file(photo.file_id)
+        file_bytes = await bot.download_file(file_info.file_path)
+        file_content = file_bytes.read()
+
+        filename = f"photo_{photo.file_id[:8]}.jpg"
+        file_id = db_save_file(file_content, filename, "image/jpeg")
+        file_url = get_file_url(file_id)
+        caption = message.caption or ""
+        part = f"🖼 [Фото]({file_url})"
+        if caption:
+            part += f"\n{caption}"
+    else:
+        part = message.text or ""
+
+    if not part:
+        await message.answer("Отправьте описание или файл")
+        return
+
+    if existing:
+        new_text = f"{existing}\n{part}"
+    else:
+        new_text = part
+
+    await state.update_data(product_info=new_text)
     await message.answer(
+        f"✅ Принято.\n\n<b>Текущее описание:</b>\n{new_text}\n\n"
+        "Можно отправить ещё документы или нажать «Далее»:",
+        reply_markup=ADD_MORE_KB,
+        parse_mode="HTML",
+    )
+
+
+@router.callback_query(F.data == "add_more_file", LeadForm.product_info)
+async def add_more_file(callback: CallbackQuery, state: FSMContext):
+    await callback.message.edit_text(
+        "Отправьте ещё один документ или нажмите «✅ Далее»",
+        reply_markup=ADD_MORE_KB,
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "finish_product", LeadForm.product_info)
+async def finish_product(callback: CallbackQuery, state: FSMContext):
+    data = await state.get_data()
+    if not data.get("product_info"):
+        await callback.message.edit_text(
+            "Сначала отправьте хотя бы описание или файл о товаре",
+            reply_markup=ADD_MORE_KB,
+        )
+        await callback.answer()
+        return
+    await callback.message.edit_text(
         "Отлично, спасибо! 💛\n\n"
         "<b>3. Какой бюджет на размещение?</b>",
         reply_markup=BUDGET_KB,
         parse_mode="HTML",
     )
     await state.set_state(LeadForm.budget)
+    await callback.answer()
+
+
+@router.callback_query(F.data == "back", LeadForm.product_info)
+async def back_from_product_info(callback: CallbackQuery, state: FSMContext):
+    await callback.message.edit_text(
+        "Чтобы я поняла, подходит ли ваш продукт нашему каналу, ответьте на "
+        "несколько вопросов:\n\n"
+        "<b>1. К какой рубрике относится ваш продукт?</b>",
+        reply_markup=CATEGORY_KB,
+        parse_mode="HTML",
+    )
+    await state.set_state(LeadForm.category)
+    await callback.answer()
 
 
 @router.callback_query(F.data.startswith("bud_"), LeadForm.budget)
@@ -195,6 +325,18 @@ async def process_budget(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
 
 
+@router.callback_query(F.data == "back", LeadForm.budget)
+async def back_from_budget(callback: CallbackQuery, state: FSMContext):
+    await state.set_state(LeadForm.product_info)
+    await callback.message.edit_text(
+        "<b>2. Расскажите коротко о товаре:</b>\n"
+        "(Можно ссылку на сайт, карточку товара или загрузить документ/фото)",
+        reply_markup=BACK_ONLY_KB,
+        parse_mode="HTML",
+    )
+    await callback.answer()
+
+
 @router.callback_query(F.data.startswith("time_"), LeadForm.timeline)
 async def process_timeline(callback: CallbackQuery, state: FSMContext):
     timeline_text = TIMELINES.get(callback.data, callback.data)
@@ -204,22 +346,14 @@ async def process_timeline(callback: CallbackQuery, state: FSMContext):
     user = callback.from_user
     score = calculate_lead_score(data["budget"], timeline_text)
 
-    if gsheet:
-        try:
-            username = f"https://t.me/{user.username}" if user.username else "Нет username"
-            await asyncio.to_thread(gsheet.append_row, [
-                datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                username,
-                user.full_name,
-                data["category"],
-                data.get("product_info", "—"),
-                data["budget"],
-                timeline_text,
-                score,
-            ])
-            logging.info(f"Лид {user.id} сохранен в Google Sheets")
-        except Exception as e:
-            logging.error(f"Ошибка записи в Google Sheets: {e}")
+    db.execute(
+        """INSERT INTO leads (user_id, username, full_name, category, product_info, budget, timeline, lead_score, status)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, '🆕 Новая')""",
+        (user.id, user.username, user.full_name, data["category"],
+         data.get("product_info", ""), data["budget"], timeline_text, score),
+    )
+    db.commit()
+    logging.info(f"Лид {user.id} сохранен в SQLite")
 
     await callback.message.edit_text(
         "Спасибо за заявку! 🌸\n\n"
@@ -231,11 +365,12 @@ async def process_timeline(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
     await state.clear()
 
+    admin_product = data.get("product_info", "—")
     admin_msg = (
         f"<b>НОВАЯ ЗАЯВКА НА РЕКЛАМУ</b>\n\n"
         f"👤 <b>От:</b> {user.full_name} ({f'@{user.username}' if user.username else 'нет username'})\n"
         f"📦 <b>Категория:</b> {data['category']}\n"
-        f"📝 <b>О товаре:</b>\n<i>{data.get('product_info', '—')}</i>\n\n"
+        f"📝 <b>О товаре:</b>\n{admin_product}\n\n"
         f"💰 <b>Бюджет:</b> {data['budget']}\n"
         f"📅 <b>Сроки:</b> {timeline_text}\n\n"
         f"📊 <b>Оценка:</b> {score}\n\n"
@@ -245,31 +380,6 @@ async def process_timeline(callback: CallbackQuery, state: FSMContext):
         await bot.send_message(ADMIN_ID, admin_msg, parse_mode="HTML", disable_web_page_preview=True)
     except Exception as e:
         logging.error(f"Ошибка отправки админу: {e}")
-
-
-@router.callback_query(F.data == "back", LeadForm.product_info)
-async def back_from_product_info(callback: CallbackQuery, state: FSMContext):
-    await callback.message.edit_text(
-        "Чтобы я поняла, подходит ли ваш продукт нашему каналу, ответьте на "
-        "несколько вопросов:\n\n"
-        "<b>1. К какой рубрике относится ваш продукт?</b>",
-        reply_markup=CATEGORY_KB,
-        parse_mode="HTML",
-    )
-    await state.set_state(LeadForm.category)
-    await callback.answer()
-
-
-@router.callback_query(F.data == "back", LeadForm.budget)
-async def back_from_budget(callback: CallbackQuery, state: FSMContext):
-    await state.set_state(LeadForm.product_info)
-    await callback.message.edit_text(
-        "<b>2. Расскажите коротко о товаре:</b>\n"
-        "(Можно ссылку на сайт или карточку товара)",
-        reply_markup=BACK_ONLY_KB,
-        parse_mode="HTML",
-    )
-    await callback.answer()
 
 
 @router.callback_query(F.data == "back", LeadForm.timeline)
@@ -299,12 +409,15 @@ async def new_request(callback: CallbackQuery, state: FSMContext):
 
 
 async def main():
-    global gsheet
-    logging.info("Инициализация Google Sheets...")
-    gsheet = get_google_sheet()
-    if gsheet:
-        logging.info("✅ Google Sheets подключены!")
-    logging.info("Запуск бота канала «Дети и Желания»...")
+    app = web.Application()
+    app.router.add_get('/files/{file_id}', handle_file)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, "0.0.0.0", FILE_SERVER_PORT)
+    await site.start()
+    logging.info(f"✅ Файловый сервер запущен на порту {FILE_SERVER_PORT}")
+
+    logging.info("Запуск бота...")
     await dp.start_polling(bot)
 
 

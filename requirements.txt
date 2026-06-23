@@ -1,4 +1,5 @@
 aiogram>=3.0
-gspread
-google-auth
+aiohttp
 python-dotenv
+fastapi
+uvicorn

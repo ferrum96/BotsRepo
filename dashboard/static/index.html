@@ -1,0 +1,350 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CRM — Дети и Желания</title>
+<script src="https://cdn.jsdelivr.net/npm/react@18/umd/react.production.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://cdn.tailwindcss.com"></script>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🌸</text></svg>">
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#f8f9fa}
+.drag-over{background:rgba(33,150,243,0.08)!important;outline:2px dashed #2196f3;outline-offset:-2px}
+.dragging{opacity:.4;transform:rotate(2deg)}
+.sidebar-item{transition:all .15s}
+.sidebar-item:hover{background:rgba(255,255,255,.15)}
+.sidebar-item.active{background:rgba(255,255,255,.2);border-left:3px solid white}
+@keyframes fadeIn{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:translateY(0)}}
+.card-in{animation:fadeIn .2s ease}
+</style>
+<script>tailwind.config={theme:{extend:{colors:{peach:{100:'#ffe8db',400:'#ff8c5a'},rose:{400:'#ff5c8a'}}}}}</script>
+</head>
+<body>
+<div id="root"></div>
+<script>
+var h=React.createElement;
+var STATUSES=['🆕 Новая','📖 Изучаю','💬 В работе','✅ Договорились','💰 Оплачено','📢 Размещено','❌ Отказ'];
+var STATUS_COLORS={'🆕 Новая':'#e3f2fd','📖 Изучаю':'#fff3e0','💬 В работе':'#fce4ec','✅ Договорились':'#e8f5e9','💰 Оплачено':'#f3e5f5','📢 Размещено':'#e0f7fa','❌ Отказ':'#ffebee'};
+var STATUS_BG={'🆕 Новая':'bg-blue-50','📖 Изучаю':'bg-orange-50','💬 В работе':'bg-pink-50','✅ Договорились':'bg-green-50','💰 Оплачено':'bg-purple-50','📢 Размещено':'bg-cyan-50','❌ Отказ':'bg-red-50'};
+var STATUS_TEXT={'🆕 Новая':'text-blue-700','📖 Изучаю':'text-orange-700','💬 В работе':'text-pink-700','✅ Договорились':'text-green-700','💰 Оплачено':'text-purple-700','📢 Размещено':'text-cyan-700','❌ Отказ':'text-red-700'};
+var PAGES=[{k:'dashboard',i:'📊',l:'Дашборд'},{k:'kanban',i:'🗂',l:'Канбан'},{k:'leads',i:'📋',l:'Все заявки'},{k:'hot',i:'🔥',l:'Горячие лиды'},{k:'analytics',i:'📈',l:'Аналитика'}];
+
+function sc(s){if(!s)return'#4a90e2';if(s.indexOf('ГОРЯЧИЙ')>=0)return'#ff4b4b';if(s.indexOf('Теплый')>=0)return'#ffc107';return'#4a90e2'}
+function sb(s){if(!s)return'bg-blue-100';if(s.indexOf('ГОРЯЧИЙ')>=0)return'bg-red-100';if(s.indexOf('Теплый')>=0)return'bg-yellow-100';return'bg-blue-100'}
+function fM(n){return new Intl.NumberFormat('ru-RU').format(n||0)+' ₽'}
+function fD(d){if(!d)return'—';return new Date(d).toLocaleDateString('ru-RU',{day:'numeric',month:'short',year:'numeric'})}
+async function api(p,o){var r=await fetch(p,Object.assign({headers:{'Content-Type':'application/json'}},o||{}));return r.json()}
+async function saveLead(id,d){return api('/api/leads/'+id,{method:'PATCH',body:JSON.stringify(d)})}
+
+function fileIcon(name){
+  if(!name)return'📄';
+  var n=name.toLowerCase();
+  if(n.match(/\.(jpg|jpeg|png|gif|webp)$/))return'🖼';
+  if(n.match(/\.pdf$/))return'📕';
+  if(n.match(/\.(doc|docx)$/))return'📘';
+  if(n.match(/\.(xls|xlsx|csv)$/))return'📊';
+  if(n.match(/\.(zip|rar|7z)$/))return'📦';
+  if(n.match(/\.(mp4|avi|mov)$/))return'🎬';
+  if(n.match(/\.(mp3|wav)$/))return'🎵';
+  return'📎';
+}
+
+function renderFiles(text,compact){
+  if(!text)return null;
+  var parts=text.split(/(\[[^\]]*\]\([^)]*\))/g);
+  return parts.map(function(part,i){
+    var m=part.match(/^\[([^\]]*)\]\(([^)]*)\)$/);
+    if(m){
+      var name=m[1],url=m[2];
+      var icon=fileIcon(name);
+      var isImg=name==='Фото'||name.match(/\.(jpg|jpeg|png|gif|webp)$/i);
+      if(compact)return h('a',{key:i,href:url,target:'_blank',title:name,className:'inline-block text-lg hover:scale-125 transition-transform'},icon);
+      return h('a',{key:i,href:url,target:'_blank',download:!isImg?name:undefined,className:'inline-flex items-center gap-1 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-lg px-2 py-1 text-xs transition-colors mr-1 mb-1'},
+        h('span',null,icon),' ',h('span',{className:'underline'},isImg?'Просмотреть':'Скачать '+name));
+    }
+    if(compact)return null;
+    return h('span',{key:i},part);
+  });
+}
+
+function Sidebar(p){
+  return h('div',{className:'fixed left-0 top-0 bottom-0 w-56 bg-gradient-to-b from-rose-400 to-peach-400 text-white shadow-xl z-50 flex flex-col'},
+    h('div',{className:'p-4 border-b border-white/20'},h('h1',{className:'text-lg font-bold'},'🌸 CRM @fkandu'),h('p',{className:'text-xs opacity-80 mt-1'},'Дети и Желания')),
+    h('nav',{className:'flex-1 py-2'},PAGES.map(function(pg){
+      return h('button',{key:pg.k,onClick:function(){p.setPage(pg.k)},className:'sidebar-item w-full text-left px-4 py-3 text-sm flex items-center gap-2 '+(p.page===pg.k?'active font-semibold':'')},
+        h('span',{className:'text-lg'},pg.i),' '+pg.l);
+    })),
+    h('div',{className:'p-4 border-t border-white/20 text-xs opacity-70'},'Данные из Telegram-бота')
+  );
+}
+
+function Metric(p){
+  return h('div',{className:'bg-white rounded-xl p-4 shadow-sm border border-gray-100'},
+    h('div',{className:'flex items-center gap-3'},h('span',{className:'text-2xl'},p.icon),
+    h('div',null,h('p',{className:'text-xs text-gray-500'},p.label),h('p',{className:'text-xl font-bold text-gray-800'},p.value))));
+}
+
+function DashboardPage(p){
+  var leads=p.leads,stats=p.stats;
+  var catC=['#ff6b9d','#c084fc','#60a5fa','#34d399','#fbbf24','#f87171','#a78bfa','#22d3ee','#fb923c'];
+  return h('div',null,
+    h('h1',{className:'text-2xl font-bold mb-6'},'📊 Обзор канала'),
+    h('div',{className:'grid grid-cols-2 md:grid-cols-4 gap-4 mb-6'},
+      h(Metric,{icon:'📥',label:'Всего заявок',value:stats.total}),
+      h(Metric,{icon:'🔥',label:'Горячих',value:stats.hot}),
+      h(Metric,{icon:'🆕',label:'Новых',value:stats['new']}),
+      h(Metric,{icon:'💰',label:'Выручка',value:fM(stats.revenue)})
+    ),
+    h('div',{className:'grid grid-cols-1 md:grid-cols-2 gap-6 mb-6'},
+      h('div',{className:'bg-white rounded-xl p-4 shadow-sm border border-gray-100'},
+        h('h3',{className:'font-semibold mb-3'},'📦 По категориям'),
+        h('div',{style:{height:'280px'},className:'flex flex-wrap items-center justify-center gap-2'},
+          stats.by_category.length?stats.by_category.map(function(c,i){
+            return h('div',{key:i,className:'text-center px-2'},
+              h('div',{style:{width:'40px',height:'40px',borderRadius:'50%',background:catC[i%9],margin:'0 auto 4px',display:'flex',alignItems:'center',justifyContent:'center',color:'#fff',fontWeight:'bold',fontSize:'12px'}},c.count),
+              h('p',{className:'text-xs text-gray-600 max-w-[80px] truncate'},c.category));
+          }):h('p',{className:'text-gray-400'},'Нет данных')
+        )
+      ),
+      h('div',{className:'bg-white rounded-xl p-4 shadow-sm border border-gray-100'},
+        h('h3',{className:'font-semibold mb-3'},'🔥 По оценкам'),
+        h('div',{className:'space-y-2 mt-4'},stats.by_score.map(function(s){
+          var mx=Math.max.apply(null,stats.by_score.map(function(x){return x.count}));
+          return h('div',{key:s.lead_score,className:'flex items-center gap-2'},
+            h('span',{className:'text-xs w-24 text-right text-gray-600'},s.lead_score),
+            h('div',{className:'flex-1 bg-gray-100 rounded-full h-6 overflow-hidden'},
+              h('div',{className:'h-full rounded-full flex items-center px-2',style:{background:sc(s.lead_score),width:Math.max(8,s.count/mx*100)+'%'}},
+                h('span',{className:'text-white text-xs font-bold'},s.count))));
+        }))
+      )
+    ),
+    h('div',{className:'bg-white rounded-xl p-4 shadow-sm border border-gray-100'},
+      h('h3',{className:'font-semibold mb-3'},'🕐 Последние 5 заявок'),
+      h('div',{className:'overflow-x-auto'},
+        h('table',{className:'w-full text-sm'},
+          h('thead',null,h('tr',{className:'text-left text-gray-500 border-b'},
+            h('th',{className:'pb-2'},'Дата'),h('th',{className:'pb-2'},'Имя'),h('th',{className:'pb-2'},'Категория'),h('th',{className:'pb-2'},'Бюджет'),h('th',{className:'pb-2'},'Оценка'),h('th',{className:'pb-2'},'Статус'))),
+          h('tbody',null,leads.slice(0,5).map(function(l){
+            return h('tr',{key:l.id,className:'border-b border-gray-50 hover:bg-gray-50'},
+              h('td',{className:'py-2'},fD(l.created_at)),
+              h('td',{className:'py-2 font-medium'},l.full_name),
+              h('td',{className:'py-2'},l.category),
+              h('td',{className:'py-2'},l.budget),
+              h('td',{className:'py-2'},h('span',{className:'text-xs px-2 py-0.5 rounded-full '+sb(l.lead_score)},l.lead_score)),
+              h('td',{className:'py-2'},h('span',{className:'text-xs px-2 py-0.5 rounded-full '+(STATUS_BG[l.status]||'')+' '+(STATUS_TEXT[l.status]||'')},l.status)));
+          }))
+        )
+      )
+    )
+  );
+}
+
+function KanbanCard(p){
+  var l=p.lead;
+  var uname=l.username&&l.username!=='Нет username'?l.username.replace('@',''):'';
+  var hasFiles=(l.product_info||'').indexOf('[')>=0&&(l.product_info||'').indexOf('](')>=0;
+  var prod=hasFiles?null:(l.product_info||'').substring(0,50)+((l.product_info||'').length>50?'...':'');
+  return h('div',{draggable:'true',
+    onDragStart:function(e){e.dataTransfer.setData('text/plain',String(l.id));e.dataTransfer.effectAllowed='move';setTimeout(function(){e.target.classList.add('dragging')},0)},
+    onDragEnd:function(e){e.target.classList.remove('dragging')},
+    className:'bg-white rounded-lg p-2.5 mb-2 shadow-sm cursor-grab active:cursor-grabbing hover:shadow-md hover:-translate-y-0.5 transition-all card-in',
+    style:{borderLeft:'4px solid '+sc(l.lead_score)}},
+    h('p',{className:'font-bold text-xs text-gray-800'},l.full_name),
+    h('p',{className:'text-gray-400 mt-0.5',style:{fontSize:'10px'}},l.category),
+    hasFiles?h('div',{className:'mt-1'},renderFiles(l.product_info,true)):h('p',{className:'text-gray-600 mt-1 truncate',style:{fontSize:'10px'}},prod),
+    h('p',{className:'font-semibold mt-1',style:{fontSize:'11px'}},l.budget,' · ',h('span',{className:'font-normal',style:{fontSize:'10px'}},l.lead_score)),
+    uname?h('a',{href:'https://t.me/'+uname,target:'_blank',className:'text-blue-500 hover:underline mt-1 inline-block',style:{fontSize:'10px'},onClick:function(e){e.stopPropagation()}},'💬 '+uname):null
+  );
+}
+
+function KanbanColumn(p){
+  var status=p.status,leads=p.leads,onDrop=p.onDrop;
+  var ov=React.useState(false);
+  var isOver=ov[0],setOver=ov[1];
+  return h('div',{className:'flex-shrink-0 rounded-xl p-1.5 bg-white shadow-sm border border-gray-100',style:{width:'185px',minWidth:'185px'},
+    onDragOver:function(e){e.preventDefault();e.dataTransfer.dropEffect='move';setOver(true)},
+    onDragLeave:function(e){if(!e.currentTarget.contains(e.relatedTarget))setOver(false)},
+    onDrop:function(e){e.preventDefault();setOver(false);var id=parseInt(e.dataTransfer.getData('text/plain'));if(id)onDrop(id,status)}},
+    h('div',{className:'text-center font-bold text-xs py-2 rounded-lg mb-1.5',style:{background:STATUS_COLORS[status]||'#f5f5f5',color:'#333'}},status+' ('+leads.length+')'),
+    h('div',{className:'min-h-[60px] rounded-lg transition-all '+(isOver?'drag-over':'')},
+      leads.length===0?h('p',{className:'text-center text-gray-300 italic py-6',style:{fontSize:'10px'}},'Перетащи сюда'):null,
+      leads.map(function(l){return h(KanbanCard,{key:l.id,lead:l})})
+    )
+  );
+}
+
+function KanbanPage(p){
+  var leads=p.leads,onRefresh=p.onRefresh;
+  var ref=React.useRef(leads);
+  var local=React.useState(leads);
+  var ll=local[0],setLL=local[1];
+  React.useEffect(function(){setLL(leads);ref.current=leads},[leads]);
+  var handleDrop=React.useCallback(function(id,newStatus){
+    var lead=ref.current.find(function(l){return l.id===id});
+    if(!lead||lead.status===newStatus)return;
+    setLL(function(prev){return prev.map(function(l){return l.id===id?Object.assign({},l,{status:newStatus}):l})});
+    saveLead(id,{status:newStatus}).then(function(){onRefresh()});
+  },[onRefresh]);
+  var groups={};STATUSES.forEach(function(s){groups[s]=[]});ll.forEach(function(l){if(groups[l.status])groups[l.status].push(l)});
+  return h('div',null,
+    h('h1',{className:'text-2xl font-bold mb-4'},'🗂 Канбан-доска'),
+    h('div',{className:'flex gap-2 overflow-x-auto pb-4',style:{minHeight:'500px'}},
+      STATUSES.map(function(s){return h(KanbanColumn,{key:s,status:s,leads:groups[s]||[],onDrop:handleDrop})})
+    )
+  );
+}
+
+function LeadsPage(p){
+  var leads=p.leads,onRefresh=p.onRefresh;
+  var st=React.useState([]);var fS=st[0],setFS=st[1];
+  var ct=React.useState([]);var fC=ct[0],setFC=ct[1];
+  var ed=React.useState(null);var editing=ed[0],setEditing=ed[1];
+  var fm=React.useState({});var form=fm[0],setForm=fm[1];
+  var cats=[];leads.forEach(function(l){if(cats.indexOf(l.category)<0)cats.push(l.category)});
+  var filtered=leads;
+  if(fS.length)filtered=filtered.filter(function(l){return fS.indexOf(l.status)>=0});
+  if(fC.length)filtered=filtered.filter(function(l){return fC.indexOf(l.category)>=0});
+  function toggleA(arr,set,val){set(arr.indexOf(val)>=0?arr.filter(function(v){return v!==val}):arr.concat([val]))}
+  function startEdit(l){setEditing(l.id);setForm({status:l.status,admin_comment:l.admin_comment||'',next_contact:l.next_contact||'',deal_amount:l.deal_amount||0})}
+  function saveEdit(id){saveLead(id,form).then(function(){setEditing(null);onRefresh()})}
+  return h('div',null,
+    h('h1',{className:'text-2xl font-bold mb-4'},'📋 Все заявки'),
+    h('div',{className:'flex gap-2 flex-wrap mb-4'},
+      h('div',{className:'flex gap-1 flex-wrap'},STATUSES.map(function(s){
+        return h('button',{key:s,onClick:function(){toggleA(fS,setFS,s)},className:'text-xs px-2 py-1 rounded-full border transition-all '+(fS.indexOf(s)>=0?'bg-rose-400 text-white border-rose-400':'bg-white border-gray-200 hover:border-rose-300')},s);
+      })),
+      h('div',{className:'flex gap-1 flex-wrap'},cats.map(function(c){
+        return h('button',{key:c,onClick:function(){toggleA(fC,setFC,c)},className:'text-xs px-2 py-1 rounded-full border transition-all '+(fC.indexOf(c)>=0?'bg-blue-400 text-white border-blue-400':'bg-white border-gray-200 hover:border-blue-300')},c);
+      }))
+    ),
+    h('p',{className:'text-sm text-gray-500 mb-3'},'Найдено: ',h('b',null,filtered.length)),
+    h('div',{className:'space-y-2'},filtered.map(function(l){
+      var isE=editing===l.id;
+      return h('div',{key:l.id,className:'bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden'},
+        h('button',{onClick:function(){startEdit(isE?null:l)},className:'w-full text-left p-3 flex items-center gap-3 hover:bg-gray-50 transition-colors'},
+          h('span',{className:'text-lg'},(l.lead_score||'').indexOf('ГОРЯЧИЙ')>=0?'🔥':(l.lead_score||'').indexOf('Теплый')>=0?'💛':'🧊'),
+          h('div',{className:'flex-1 min-w-0'},
+            h('p',{className:'font-semibold text-sm'},l.full_name,' ',h('span',{className:'text-gray-400 font-normal'},'@'+(l.username||'—'))),
+            h('p',{className:'text-xs text-gray-500 truncate'},l.category,' · ',l.budget,' · ',l.timeline)),
+          h('span',{className:'text-xs px-2 py-0.5 rounded-full '+(STATUS_BG[l.status]||'')+' '+(STATUS_TEXT[l.status]||'')},l.status),
+          h('span',{className:'text-gray-400'},isE?'▲':'▼')),
+        isE?h('div',{className:'p-4 bg-gray-50 border-t border-gray-100 grid grid-cols-1 md:grid-cols-2 gap-4'},
+          h('div',null,
+            h('p',{className:'text-xs text-gray-500 mb-1'},'📝 О товаре'),h('div',{className:'text-sm'},renderFiles(l.product_info)),
+            h('div',{className:'mt-3 space-y-2'},
+              h('div',null,h('label',{className:'text-xs text-gray-500'},'Статус'),
+                h('select',{value:form.status,onChange:function(e){setForm(Object.assign({},form,{status:e.target.value}))},className:'w-full mt-1 p-2 border rounded-lg text-sm'},
+                  STATUSES.map(function(s){return h('option',{key:s,value:s},s)}))),
+              h('div',null,h('label',{className:'text-xs text-gray-500'},'Комментарий'),
+                h('textarea',{value:form.admin_comment,onChange:function(e){setForm(Object.assign({},form,{admin_comment:e.target.value}))},className:'w-full mt-1 p-2 border rounded-lg text-sm',rows:2})))),
+          h('div',{className:'space-y-2'},
+            h('div',null,h('label',{className:'text-xs text-gray-500'},'Когда написать'),
+              h('input',{type:'date',value:form.next_contact||'',onChange:function(e){setForm(Object.assign({},form,{next_contact:e.target.value}))},className:'w-full mt-1 p-2 border rounded-lg text-sm'})),
+            h('div',null,h('label',{className:'text-xs text-gray-500'},'Сумма сделки (₽)'),
+              h('input',{type:'number',value:form.deal_amount,onChange:function(e){setForm(Object.assign({},form,{deal_amount:parseFloat(e.target.value)||0}))},className:'w-full mt-1 p-2 border rounded-lg text-sm'})),
+            h('div',{className:'flex gap-2 mt-3'},
+              l.username&&l.username!=='Нет username'?h('a',{href:'https://t.me/'+l.username.replace('@',''),target:'_blank',className:'text-xs bg-blue-500 text-white px-3 py-1.5 rounded-lg hover:bg-blue-600'},'💬 Написать в ЛС'):null,
+              h('button',{onClick:function(){saveEdit(l.id)},className:'text-xs bg-green-500 text-white px-4 py-1.5 rounded-lg hover:bg-green-600 font-semibold'},'💾 Сохранить')))):null
+      );
+    }))
+  );
+}
+
+function HotLeadsPage(p){
+  var hot=p.leads.filter(function(l){return(l.lead_score||'').indexOf('ГОРЯЧИЙ')>=0&&['📢 Размещено','❌ Отказ','💰 Оплачено'].indexOf(l.status)<0});
+  return h('div',null,
+    h('h1',{className:'text-2xl font-bold mb-2'},'🔥 Горячие лиды'),
+    h('p',{className:'text-sm text-gray-500 mb-4'},'Заявки с высоким бюджетом — обрабатывайте в первую очередь'),
+    hot.length===0?h('div',{className:'bg-green-50 text-green-700 p-4 rounded-xl text-center'},'🎉 Нет необработанных горячих лидов!')
+    :h('div',{className:'space-y-3'},hot.map(function(l){
+      var uname=(l.username||'').replace('@','');
+      return h('div',{key:l.id,className:'bg-white rounded-xl border-l-4 border-red-400 p-4 shadow-sm'},
+        h('div',{className:'flex items-start justify-between'},
+          h('div',null,
+            h('p',{className:'font-bold'},l.full_name,' ',h('span',{className:'text-gray-400 font-normal'},'@'+(uname||'—'))),
+            h('p',{className:'text-sm text-gray-600 mt-1'},l.category,' · ',l.budget),
+            h('div',{className:'text-sm text-gray-500 mt-1'},renderFiles(l.product_info)),
+            h('p',{className:'text-xs text-gray-400 mt-2'},'📅 ',l.timeline)),
+          uname?h('a',{href:'https://t.me/'+uname,target:'_blank',className:'bg-red-500 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-red-600 whitespace-nowrap'},'💬 Написать сейчас'):null)
+      );
+    }))
+  );
+}
+
+function AnalyticsPage(p){
+  var stats=p.stats;
+  var mxR=Math.max.apply(null,(stats.monthly_revenue||[]).map(function(m){return m.revenue||0}).concat([1]));
+  var mxCR=Math.max.apply(null,(stats.category_revenue||[]).map(function(c){return c.revenue||0}).concat([1]));
+  return h('div',null,
+    h('h1',{className:'text-2xl font-bold mb-6'},'📈 Аналитика'),
+    h('div',{className:'grid grid-cols-1 md:grid-cols-2 gap-6 mb-6'},
+      h('div',{className:'bg-white rounded-xl p-4 shadow-sm border border-gray-100'},
+        h('h3',{className:'font-semibold mb-3'},'💰 Выручка по месяцам'),
+        (stats.monthly_revenue||[]).length?h('div',{className:'space-y-2 mt-4'},stats.monthly_revenue.map(function(m){
+          return h('div',{key:m.month,className:'flex items-center gap-2'},
+            h('span',{className:'text-xs w-16 text-right text-gray-500'},m.month),
+            h('div',{className:'flex-1 bg-gray-100 rounded-full h-6 overflow-hidden'},
+              h('div',{className:'h-full rounded-full bg-gradient-to-r from-rose-400 to-peach-400 flex items-center px-2',style:{width:Math.max(8,m.revenue/mxR*100)+'%'}},
+                h('span',{className:'text-white text-xs font-bold'},fM(m.revenue)))));
+        })):h('p',{className:'text-gray-400 text-center mt-20'},'Нет данных о выручке')),
+      h('div',{className:'bg-white rounded-xl p-4 shadow-sm border border-gray-100'},
+        h('h3',{className:'font-semibold mb-3'},'📊 Воронка конверсии'),
+        h('div',{className:'space-y-2 mt-4'},(stats.by_status||[]).map(function(s){
+          var mx=Math.max.apply(null,stats.by_status.map(function(x){return x.count}));
+          return h('div',{key:s.status,className:'flex items-center gap-2'},
+            h('span',{className:'text-xs w-28 text-right text-gray-600 truncate'},s.status),
+            h('div',{className:'flex-1 bg-gray-100 rounded-full h-6 overflow-hidden'},
+              h('div',{className:'h-full rounded-full bg-purple-400 flex items-center px-2',style:{width:Math.max(8,s.count/mx*100)+'%'}},
+                h('span',{className:'text-white text-xs font-bold'},s.count))));
+        })))
+    ),
+    h('div',{className:'bg-white rounded-xl p-4 shadow-sm border border-gray-100'},
+      h('h3',{className:'font-semibold mb-3'},'📦 Топ категорий по выручке'),
+      (stats.category_revenue||[]).length?h('div',{className:'space-y-2 mt-4'},stats.category_revenue.map(function(c){
+        return h('div',{key:c.category,className:'flex items-center gap-2'},
+          h('span',{className:'text-xs w-40 text-right text-gray-600 truncate'},c.category),
+          h('div',{className:'flex-1 bg-gray-100 rounded-full h-6 overflow-hidden'},
+            h('div',{className:'h-full rounded-full bg-green-400 flex items-center px-2',style:{width:Math.max(8,c.revenue/mxCR*100)+'%'}},
+              h('span',{className:'text-white text-xs font-bold'},fM(c.revenue)))));
+      })):h('p',{className:'text-gray-400 text-center mt-10'},'Нет данных'))
+  );
+}
+
+var _s=React.useState,_ef=React.useEffect,_cb=React.useCallback;
+function App(){
+  var validPages=['dashboard','kanban','leads','hot','analytics'];
+  var hash=(window.location.hash||'').replace('#','');
+  var initial=validPages.indexOf(hash)>=0?hash:'kanban';
+  var ps=_s(initial);var page=ps[0],setPageRaw=ps[1];
+  var setPage=function(p){window.location.hash=p;setPageRaw(p)};
+  React.useEffect(function(){
+    var handler=function(){var h=(window.location.hash||'').replace('#','');if(validPages.indexOf(h)>=0)setPageRaw(h)};
+    window.addEventListener('hashchange',handler);return function(){window.removeEventListener('hashchange',handler)};
+  },[]);
+  var ls=_s([]);var leads=ls[0],setLeads=ls[1];
+  var ss=_s({total:0,hot:0,new:0,revenue:0,by_category:[],by_score:[],by_status:[],monthly_revenue:[],category_revenue:[]});var stats=ss[0],setStats=ss[1];
+  var ld=_s(true);var loading=ld[0],setLoading=ld[1];
+  var refresh=_cb(function(){
+    Promise.all([api('/api/leads'),api('/api/stats')]).then(function(r){setLeads(r[0]);setStats(r[1]);setLoading(false)}).catch(function(){setLoading(false)});
+  },[]);
+  _ef(function(){refresh()},[]);
+  _ef(function(){var t=setInterval(refresh,30000);return function(){clearInterval(t)}},[]);
+  if(loading)return h('div',{className:'flex items-center justify-center h-screen'},h('div',{className:'text-center'},h('p',{className:'text-4xl mb-4'},'🌸'),h('p',{className:'text-gray-500'},'Загрузка...')));
+  return h('div',{className:'flex min-h-screen'},
+    h(Sidebar,{page:page,setPage:setPage}),
+    h('main',{className:'flex-1 ml-56 p-6'},
+      page==='dashboard'?h(DashboardPage,{leads:leads,stats:stats}):null,
+      page==='kanban'?h(KanbanPage,{leads:leads,onRefresh:refresh}):null,
+      page==='leads'?h(LeadsPage,{leads:leads,onRefresh:refresh}):null,
+      page==='hot'?h(HotLeadsPage,{leads:leads}):null,
+      page==='analytics'?h(AnalyticsPage,{stats:stats}):null
+    )
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(h(App));
+</script>
+</body>
+</html>
