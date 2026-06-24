@@ -96,7 +96,8 @@ def get_file_url(file_id: int) -> str:
 
 class LeadForm(StatesGroup):
     category = State()
-    product_info = State()
+    product_description = State()
+    product_files = State()
     budget = State()
     timeline = State()
 
@@ -177,7 +178,12 @@ BACK_ONLY_KB = make_keyboard([("🔙 Назад", "back")])
 
 ADD_MORE_KB = InlineKeyboardMarkup(inline_keyboard=[
     [InlineKeyboardButton(text="📎 Ещё файл", callback_data="add_more_file")],
-    [InlineKeyboardButton(text="✅ Далее", callback_data="finish_product")],
+    [InlineKeyboardButton(text="✅ Далее", callback_data="finish_files")],
+])
+
+AFTER_DESC_KB = InlineKeyboardMarkup(inline_keyboard=[
+    [InlineKeyboardButton(text="📎 Прикрепить файлы", callback_data="attach_files")],
+    [InlineKeyboardButton(text="✅ Далее", callback_data="skip_files")],
 ])
 
 NEW_REQUEST_KB = make_keyboard([("📝 Новая заявка", "new_request")])
@@ -208,18 +214,69 @@ async def process_category(callback: CallbackQuery, state: FSMContext):
     await callback.message.edit_text(
         f"Принято: <b>{cat_name}</b> ✅\n\n"
         "<b>2. Расскажите коротко о товаре:</b>\n"
-        "(Можно ссылку на сайт, карточку товара или загрузить документ/фото)",
+        "(Текстом — что за продукт, для кого, чем интересен)",
         reply_markup=BACK_ONLY_KB,
         parse_mode="HTML",
     )
-    await state.set_state(LeadForm.product_info)
+    await state.set_state(LeadForm.product_description)
     await callback.answer()
 
 
-@router.message(LeadForm.product_info)
-async def process_product_info(message: Message, state: FSMContext):
+@router.message(LeadForm.product_description)
+async def process_product_description(message: Message, state: FSMContext):
+    text = message.text or ""
+    if not text:
+        await message.answer("Отправьте текстовое описание товара")
+        return
+    await state.update_data(product_description=text)
+    await message.answer(
+        f"✅ Описание принято:\n\n<i>{text}</i>\n\n"
+        "Также можно прикрепить файлы или перейти дальше:",
+        reply_markup=AFTER_DESC_KB,
+        parse_mode="HTML",
+    )
+
+
+@router.callback_query(F.data == "attach_files", LeadForm.product_description)
+async def attach_files(callback: CallbackQuery, state: FSMContext):
+    await callback.message.edit_text(
+        "📎 Отправьте документ или фото.\n"
+        "Можно отправить несколько файлов, затем нажмите «✅ Далее»:",
+        reply_markup=ADD_MORE_KB,
+    )
+    await state.set_state(LeadForm.product_files)
+    await callback.answer()
+
+
+@router.callback_query(F.data == "skip_files", LeadForm.product_description)
+async def skip_files(callback: CallbackQuery, state: FSMContext):
+    await callback.message.edit_text(
+        "Отлично, спасибо! 💛\n\n"
+        "<b>3. Какой бюджет на размещение?</b>",
+        reply_markup=BUDGET_KB,
+        parse_mode="HTML",
+    )
+    await state.set_state(LeadForm.budget)
+    await callback.answer()
+
+
+@router.callback_query(F.data == "back", LeadForm.product_description)
+async def back_from_description(callback: CallbackQuery, state: FSMContext):
+    await callback.message.edit_text(
+        "Чтобы я поняла, подходит ли ваш продукт нашему каналу, ответьте на "
+        "несколько вопросов:\n\n"
+        "<b>1. К какой рубрике относится ваш продукт?</b>",
+        reply_markup=CATEGORY_KB,
+        parse_mode="HTML",
+    )
+    await state.set_state(LeadForm.category)
+    await callback.answer()
+
+
+@router.message(LeadForm.product_files)
+async def process_product_files(message: Message, state: FSMContext):
     data = await state.get_data()
-    existing = data.get("product_info", "")
+    existing = data.get("product_files", "")
 
     if message.document:
         doc_name = message.document.file_name
@@ -232,7 +289,7 @@ async def process_product_info(message: Message, state: FSMContext):
 
         file_id = db_save_file(file_content, doc_name, mime)
         file_url = get_file_url(file_id)
-        part = f"<a href='{file_url}'>📎</a> {doc_name}"
+        part = f'<a href="{file_url}">📎 {doc_name}</a>'
         if caption:
             part += f"\n{caption}"
     elif message.photo:
@@ -245,14 +302,11 @@ async def process_product_info(message: Message, state: FSMContext):
         file_id = db_save_file(file_content, filename, "image/jpeg")
         file_url = get_file_url(file_id)
         caption = message.caption or ""
-        part = f"<a href='{file_url}'>🖼</a>"
+        part = f'<a href="{file_url}">🖼 Фото</a>'
         if caption:
             part += f"\n{caption}"
     else:
-        part = message.text or ""
-
-    if not part:
-        await message.answer("Отправьте описание или файл")
+        await message.answer("Отправьте документ или фото")
         return
 
     if existing:
@@ -260,16 +314,16 @@ async def process_product_info(message: Message, state: FSMContext):
     else:
         new_text = part
 
-    await state.update_data(product_info=new_text)
+    await state.update_data(product_files=new_text)
     await message.answer(
-        f"✅ Принято.\n\n<b>Текущее описание:</b>\n{new_text}\n\n"
-        "Можно отправить ещё документы или нажать «Далее»:",
+        f"✅ Файл сохранён.\n\n"
+        "Можно отправить ещё или нажать «Далее»:",
         reply_markup=ADD_MORE_KB,
         parse_mode="HTML",
     )
 
 
-@router.callback_query(F.data == "add_more_file", LeadForm.product_info)
+@router.callback_query(F.data == "add_more_file", LeadForm.product_files)
 async def add_more_file(callback: CallbackQuery, state: FSMContext):
     await callback.message.edit_text(
         "Отправьте ещё один документ или нажмите «✅ Далее»",
@@ -278,16 +332,8 @@ async def add_more_file(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
 
 
-@router.callback_query(F.data == "finish_product", LeadForm.product_info)
-async def finish_product(callback: CallbackQuery, state: FSMContext):
-    data = await state.get_data()
-    if not data.get("product_info"):
-        await callback.message.edit_text(
-            "Сначала отправьте хотя бы описание или файл о товаре",
-            reply_markup=ADD_MORE_KB,
-        )
-        await callback.answer()
-        return
+@router.callback_query(F.data == "finish_files", LeadForm.product_files)
+async def finish_files(callback: CallbackQuery, state: FSMContext):
     await callback.message.edit_text(
         "Отлично, спасибо! 💛\n\n"
         "<b>3. Какой бюджет на размещение?</b>",
@@ -298,16 +344,15 @@ async def finish_product(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
 
 
-@router.callback_query(F.data == "back", LeadForm.product_info)
-async def back_from_product_info(callback: CallbackQuery, state: FSMContext):
+@router.callback_query(F.data == "back", LeadForm.product_files)
+async def back_from_files(callback: CallbackQuery, state: FSMContext):
     await callback.message.edit_text(
-        "Чтобы я поняла, подходит ли ваш продукт нашему каналу, ответьте на "
-        "несколько вопросов:\n\n"
-        "<b>1. К какой рубрике относится ваш продукт?</b>",
-        reply_markup=CATEGORY_KB,
+        "<b>2. Расскажите коротко о товаре:</b>\n"
+        "(Текстом — что за продукт, для кого, чем интересен)",
+        reply_markup=BACK_ONLY_KB,
         parse_mode="HTML",
     )
-    await state.set_state(LeadForm.category)
+    await state.set_state(LeadForm.product_description)
     await callback.answer()
 
 
@@ -327,13 +372,22 @@ async def process_budget(callback: CallbackQuery, state: FSMContext):
 
 @router.callback_query(F.data == "back", LeadForm.budget)
 async def back_from_budget(callback: CallbackQuery, state: FSMContext):
-    await state.set_state(LeadForm.product_info)
-    await callback.message.edit_text(
-        "<b>2. Расскажите коротко о товаре:</b>\n"
-        "(Можно ссылку на сайт, карточку товара или загрузить документ/фото)",
-        reply_markup=BACK_ONLY_KB,
-        parse_mode="HTML",
-    )
+    data = await state.get_data()
+    if data.get("product_files"):
+        await state.set_state(LeadForm.product_files)
+        await callback.message.edit_text(
+            "📎 Отправьте документ или фото.\n"
+            "Можно отправить несколько файлов, затем нажмите «✅ Далее»:",
+            reply_markup=ADD_MORE_KB,
+        )
+    else:
+        await state.set_state(LeadForm.product_description)
+        await callback.message.edit_text(
+            "<b>2. Расскажите коротко о товаре:</b>\n"
+            "(Текстом — что за продукт, для кого, чем интересен)",
+            reply_markup=BACK_ONLY_KB,
+            parse_mode="HTML",
+        )
     await callback.answer()
 
 
@@ -346,11 +400,17 @@ async def process_timeline(callback: CallbackQuery, state: FSMContext):
     user = callback.from_user
     score = calculate_lead_score(data["budget"], timeline_text)
 
+    desc = data.get("product_description", "")
+    files = data.get("product_files", "")
+    product_info = desc
+    if files:
+        product_info = f"{desc}\n\n📎 Прикрепленные файлы:\n{files}" if desc else files
+
     db.execute(
         """INSERT INTO leads (user_id, username, full_name, category, product_info, budget, timeline, lead_score, status)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, '🆕 Новая')""",
         (user.id, user.username, user.full_name, data["category"],
-         data.get("product_info", ""), data["budget"], timeline_text, score),
+         product_info, data["budget"], timeline_text, score),
     )
     db.commit()
     logging.info(f"Лид {user.id} сохранен в SQLite")
@@ -365,7 +425,7 @@ async def process_timeline(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
     await state.clear()
 
-    admin_product = data.get("product_info", "—")
+    admin_product = product_info
     admin_msg = (
         f"<b>НОВАЯ ЗАЯВКА НА РЕКЛАМУ</b>\n\n"
         f"👤 <b>От:</b> {user.full_name} ({f'@{user.username}' if user.username else 'нет username'})\n"
@@ -374,8 +434,8 @@ async def process_timeline(callback: CallbackQuery, state: FSMContext):
         f"💰 <b>Бюджет:</b> {data['budget']}\n"
         f"📅 <b>Сроки:</b> {timeline_text}\n\n"
         f"📊 <b>Оценка:</b> {score}\n\n"
-        f"💬 <a href='https://t.me/{user.username}'>Написать в ЛС</a>\n"
-        f"📊 <a href='http://{HOSTNAME}:8000'>Открыть дашборд</a>"
+        f'💬 <a href="https://t.me/{user.username}">Написать в ЛС</a>\n'
+        f'📊 <a href="http://{HOSTNAME}:8000">Открыть дашборд</a>'
     )
     try:
         await bot.send_message(ADMIN_ID, admin_msg, parse_mode="HTML", disable_web_page_preview=True)
