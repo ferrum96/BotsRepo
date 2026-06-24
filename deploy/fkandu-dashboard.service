@@ -1,0 +1,14 @@
+[Unit]
+Description=FKandu Dashboard API
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/fkandu_manager_bot
+ExecStart=/usr/bin/python3 scripts/api.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

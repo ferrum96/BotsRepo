@@ -1,0 +1,14 @@
+[Unit]
+Description=FKandu Bot
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/fkandu_manager_bot
+ExecStart=/usr/bin/python3 scripts/bot.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
