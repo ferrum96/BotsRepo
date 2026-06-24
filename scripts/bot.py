@@ -232,7 +232,7 @@ async def process_product_info(message: Message, state: FSMContext):
 
         file_id = db_save_file(file_content, doc_name, mime)
         file_url = get_file_url(file_id)
-        part = f"📎 [{doc_name}]({file_url})"
+        part = f"<a href='{file_url}'>📎</a> {doc_name}"
         if caption:
             part += f"\n{caption}"
     elif message.photo:
@@ -245,7 +245,7 @@ async def process_product_info(message: Message, state: FSMContext):
         file_id = db_save_file(file_content, filename, "image/jpeg")
         file_url = get_file_url(file_id)
         caption = message.caption or ""
-        part = f"🖼 [Фото]({file_url})"
+        part = f"<a href='{file_url}'>🖼</a>"
         if caption:
             part += f"\n{caption}"
     else:
@@ -374,7 +374,8 @@ async def process_timeline(callback: CallbackQuery, state: FSMContext):
         f"💰 <b>Бюджет:</b> {data['budget']}\n"
         f"📅 <b>Сроки:</b> {timeline_text}\n\n"
         f"📊 <b>Оценка:</b> {score}\n\n"
-        f"💬 <a href='https://t.me/{user.username}'>Написать в ЛС</a>"
+        f"💬 <a href='https://t.me/{user.username}'>Написать в ЛС</a>\n"
+        f"📊 <a href='http://{HOSTNAME}:8000'>Открыть дашборд</a>"
     )
     try:
         await bot.send_message(ADMIN_ID, admin_msg, parse_mode="HTML", disable_web_page_preview=True)
