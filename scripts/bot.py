@@ -429,7 +429,7 @@ async def process_timeline(callback: CallbackQuery, state: FSMContext):
     admin_msg = (
         f"<b>НОВАЯ ЗАЯВКА НА РЕКЛАМУ</b>\n\n"
         f"👤 <b>От:</b> {user.full_name} ({f'@{user.username}' if user.username else 'нет username'})\n"
-        f"📦 <b>Категория:</b> {data['category']}\n"
+        f"📦 <b>Категория:</b> {data['category']}\n\n"
         f"📝 <b>О товаре:</b>\n{admin_product}\n\n"
         f"💰 <b>Бюджет:</b> {data['budget']}\n"
         f"📅 <b>Сроки:</b> {timeline_text}\n\n"

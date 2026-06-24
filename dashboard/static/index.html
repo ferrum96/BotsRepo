@@ -79,15 +79,14 @@ function renderTextWithLinks(text,key){
 
 function renderFiles(text,compact){
   if(!text)return null;
-  var parts=text.split(/(<a\s+href=['"][^'"]*['"][^>]*>.*?<\/a>\s*\S*)/gi);
+  var parts=text.split(/(<a\s+href=['"][^'"]*['"][^>]*>[\s\S]*?<\/a>)/gi);
   var textParts=[];
   var fileParts=[];
   parts.forEach(function(part,i){
-    var m=part.match(/<a\s+href=['"]([^'"]*)['"][^>]*>(.*?)<\/a>\s*(.*)/i);
+    var m=part.match(/<a\s+href=['"]([^'"]*)['"][^>]*>([\s\S]*?)<\/a>/i);
     if(m){
-      var url=m[1],icon=m[2],fname=m[3].trim();
-      fileParts.push(h('a',{key:'f'+i,href:url,target:'_blank',className:'inline-block text-lg hover:scale-125 transition-transform'},icon));
-      if(fname)fileParts.push(h('span',{key:'n'+i,className:'text-xs text-gray-500 mr-1'},fname));
+      var url=m[1],content=m[2].trim();
+      fileParts.push(h('a',{key:'f'+i,href:url,target:'_blank',className:'inline-flex items-center gap-1 text-sm text-blue-500 hover:underline'},content));
     }else if(part.trim()){
       var cleaned=part.trim().replace(/[\uD83C-\uDBFF\uDC00-\uDFFF]/g,'').trim();
       if(cleaned)textParts.push(renderTextWithLinks(cleaned,'t'+i));
@@ -319,6 +318,14 @@ function LeadsPage(p){
   var hashId=(window.location.hash||'').match(/id=(\d+)/);
   var ed=React.useState(hashId?parseInt(hashId[1]):null);var editing=ed[0],setEditing=ed[1];
   var fm=React.useState({});var form=fm[0],setForm=fm[1];
+  React.useEffect(function(){
+    if(editing){
+      setTimeout(function(){
+        var el=document.getElementById('lead-'+editing);
+        if(el)el.scrollIntoView({behavior:'smooth',block:'start'});
+      },100);
+    }
+  },[editing]);
   var cats=[];leads.forEach(function(l){if(cats.indexOf(l.category)<0)cats.push(l.category)});
   var filtered=leads;
   if(fS.length)filtered=filtered.filter(function(l){return fS.indexOf(l.status)>=0});
@@ -339,7 +346,7 @@ function LeadsPage(p){
     h('p',{className:'text-xs md:text-sm text-gray-500 mb-2 md:mb-3'},'Найдено: ',h('b',null,filtered.length)),
     h('div',{className:'space-y-2'},filtered.map(function(l){
       var isE=editing===l.id;
-      return h('div',{key:l.id,className:'bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden'},
+      return h('div',{key:l.id,id:'lead-'+l.id,className:'bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden'},
         h('button',{onClick:function(){startEdit(isE?null:l)},className:'w-full text-left p-2.5 md:p-3 flex items-center gap-2 md:gap-3 hover:bg-gray-50 transition-colors'},
           h('span',{className:'text-base md:text-lg'},(l.lead_score||'').indexOf('ГОРЯЧИЙ')>=0?'🔥':(l.lead_score||'').indexOf('Теплый')>=0?'💛':'🧊'),
           h('div',{className:'flex-1 min-w-0'},
