@@ -34,31 +34,30 @@ export async function PUT(
 
   const { labelIds, ...data } = body
 
-  if (labelIds) {
-    await prisma.taskLabel.deleteMany({
-      where: { taskId: id },
-    })
-  }
-
   try {
     const { columnId, ...scalarData } = data
-    await prisma.task.update({
-      where: { id },
-      data: {
-        ...scalarData,
-        priority: scalarData.priority as Priority | undefined,
-        ...(columnId !== undefined && { columnId }),
-      },
-    })
-
-    if (labelIds) {
-      await prisma.taskLabel.createMany({
-        data: labelIds.map((labelId) => ({
-          taskId: id,
-          labelId,
-        })),
+    await prisma.$transaction(async (tx) => {
+      await tx.task.update({
+        where: { id },
+        data: {
+          ...scalarData,
+          priority: scalarData.priority as Priority | undefined,
+          ...(columnId !== undefined && { columnId }),
+        },
       })
-    }
+
+      if (labelIds) {
+        await tx.taskLabel.deleteMany({
+          where: { taskId: id },
+        })
+        await tx.taskLabel.createMany({
+          data: labelIds.map((labelId) => ({
+            taskId: id,
+            labelId,
+          })),
+        })
+      }
+    })
 
     const task = await prisma.task.findUnique({
       where: { id },

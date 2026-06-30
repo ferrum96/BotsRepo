@@ -17,43 +17,47 @@ export async function PATCH(
     return NextResponse.json({ error: 'Task not found' }, { status: 404 })
   }
 
-  await prisma.$transaction(async (tx) => {
-    await tx.task.updateMany({
-      where: {
-        columnId: task.columnId,
-        position: { gt: task.position },
-      },
-      data: {
-        position: { decrement: 1 },
-      },
+  try {
+    await prisma.$transaction(async (tx) => {
+      await tx.task.updateMany({
+        where: {
+          columnId: task.columnId,
+          position: { gt: task.position },
+        },
+        data: {
+          position: { decrement: 1 },
+        },
+      })
+
+      await tx.task.updateMany({
+        where: {
+          columnId: body.columnId,
+          position: { gte: body.position },
+        },
+        data: {
+          position: { increment: 1 },
+        },
+      })
+
+      await tx.task.update({
+        where: { id },
+        data: {
+          columnId: body.columnId,
+          position: body.position,
+        },
+      })
     })
 
-    await tx.task.updateMany({
-      where: {
-        columnId: body.columnId,
-        position: { gte: body.position },
-      },
-      data: {
-        position: { increment: 1 },
-      },
-    })
-
-    await tx.task.update({
+    const updatedTask = await prisma.task.findUnique({
       where: { id },
-      data: {
-        columnId: body.columnId,
-        position: body.position,
+      include: {
+        epic: true,
+        labels: { include: { label: true } },
       },
     })
-  })
 
-  const updatedTask = await prisma.task.findUnique({
-    where: { id },
-    include: {
-      epic: true,
-      labels: { include: { label: true } },
-    },
-  })
-
-  return NextResponse.json(updatedTask)
+    return NextResponse.json(updatedTask)
+  } catch (_error) {
+    return NextResponse.json({ error: 'Failed to move task' }, { status: 500 })
+  }
 }
