@@ -47,8 +47,8 @@ def activity_keyboard() -> InlineKeyboardMarkup:
 def perspective_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         [
-            [InlineKeyboardButton("FPP", callback_data="perspective:fpp")],
-            [InlineKeyboardButton("TPP", callback_data="perspective:tpp")],
+            [InlineKeyboardButton("FPP(первое лицо)", callback_data="perspective:fpp")],
+            [InlineKeyboardButton("TPP(третье лицо)", callback_data="perspective:tpp")],
             [
                 InlineKeyboardButton(
                     "Mixed mode", callback_data="perspective:mixed"
