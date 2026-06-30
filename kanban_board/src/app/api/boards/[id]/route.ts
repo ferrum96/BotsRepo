@@ -40,12 +40,18 @@ export async function PUT(
   const { id } = await params
   const body = await request.json()
 
-  const board = await prisma.board.update({
-    where: { id },
-    data: { name: body.name },
-  })
-
-  return NextResponse.json(board)
+  try {
+    const board = await prisma.board.update({
+      where: { id },
+      data: { name: body.name },
+    })
+    return NextResponse.json(board)
+  } catch (error: unknown) {
+    if (error && typeof error === 'object' && 'code' in error && error.code === 'P2025') {
+      return NextResponse.json({ error: 'Board not found' }, { status: 404 })
+    }
+    throw error
+  }
 }
 
 export async function DELETE(
@@ -53,6 +59,13 @@ export async function DELETE(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params
-  await prisma.board.delete({ where: { id } })
-  return NextResponse.json({ success: true })
+  try {
+    await prisma.board.delete({ where: { id } })
+    return NextResponse.json({ success: true })
+  } catch (error: unknown) {
+    if (error && typeof error === 'object' && 'code' in error && error.code === 'P2025') {
+      return NextResponse.json({ error: 'Board not found' }, { status: 404 })
+    }
+    throw error
+  }
 }

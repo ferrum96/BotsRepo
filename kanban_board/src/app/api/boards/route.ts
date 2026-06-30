@@ -23,6 +23,10 @@ export async function GET() {
 export async function POST(request: Request) {
   const body: CreateBoardInput = await request.json()
 
+  if (!body.name) {
+    return NextResponse.json({ error: 'Name is required' }, { status: 400 })
+  }
+
   const board = await prisma.board.create({
     data: {
       name: body.name,

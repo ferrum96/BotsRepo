@@ -8,6 +8,10 @@ export async function POST(
   const { id } = await params
   const body = await request.json()
 
+  if (!body.title) {
+    return NextResponse.json({ error: 'Title is required' }, { status: 400 })
+  }
+
   const maxPosition = await prisma.column.aggregate({
     where: { boardId: id },
     _max: { position: true },
