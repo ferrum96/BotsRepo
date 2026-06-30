@@ -1,3 +1,4 @@
+export type { Board, Column, Epic, Task, Label, TaskLabel } from '@prisma/client'
 import { Board, Column, Epic, Task, Label, TaskLabel } from '@prisma/client'
 
 export type BoardWithColumns = Board & {
