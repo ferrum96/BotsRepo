@@ -9,6 +9,8 @@ export type BoardWithDetails = Board & {
   columns: (Column & {
     tasks: TaskWithDetails[]
   })[]
+  epics: Epic[]
+  labels: Label[]
 }
 
 export type TaskWithDetails = Task & {
