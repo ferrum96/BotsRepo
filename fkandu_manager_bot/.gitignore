@@ -1,9 +1,39 @@
+# Environment
 .env
 !.env.example
+
+# Logs
 bot.log
 api.log
+
+# Database
 db/leads.db
-scripts/seed_db.py
+db/*.db
+
+# Frontend
+dashboard/frontend/.next
+dashboard/frontend/node_modules
+dashboard/frontend/.env*
+dashboard/frontend/.env.local
+
+# Backend
+dashboard/backend/__pycache__
+dashboard/backend/*.pyc
+dashboard/backend/.venv
+
+# Bot
+bot/__pycache__
+bot/**/*.pyc
+.venv
+__pycache__
+*.pyc
+
+# OS
 .DS_Store
-dashboard/.next
-dashboard/node_modules
+Thumbs.db
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
