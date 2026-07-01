@@ -125,7 +125,9 @@ export function renderFiles(text: string | null, compact: boolean = false): Reac
 }
 
 export async function api(path: string, options?: RequestInit): Promise<any> {
-  const response = await fetch(path, {
+  const baseUrl = process.env.NEXT_PUBLIC_API_URL || '';
+  const url = baseUrl + path;
+  const response = await fetch(url, {
     headers: { 'Content-Type': 'application/json' },
     ...options,
   });

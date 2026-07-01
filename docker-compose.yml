@@ -32,6 +32,19 @@ services:
     networks:
       - app-network
 
+  fkandu-api:
+    build:
+      context: ./fkandu_manager_bot
+      dockerfile: Dockerfile.api
+    container_name: fkandu-api
+    restart: unless-stopped
+    ports:
+      - "8001:8000"
+    volumes:
+      - ./fkandu_manager_bot/db:/app/db
+    networks:
+      - app-network
+
   fkandu-dashboard:
     build:
       context: ./fkandu_manager_bot/dashboard
@@ -42,7 +55,7 @@ services:
       - "8000:3000"
     environment:
       - NODE_ENV=production
-      - API_URL=http://fkandu-bot:8000
+      - NEXT_PUBLIC_API_URL=http://localhost:8001
     networks:
       - app-network
 
