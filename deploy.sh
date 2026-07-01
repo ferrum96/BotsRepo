@@ -20,8 +20,6 @@ echo "Создание директорий для данных..."
 mkdir -p kanban_board/data
 mkdir -p fkandu_manager_bot/db
 mkdir -p pubg_moderator_bot/data
-mkdir -p nginx/certs
-mkdir -p nginx/www
 echo "✅ Директории созданы"
 echo ""
 
@@ -35,19 +33,15 @@ echo "Проверка статуса контейнеров..."
 docker-compose ps
 echo ""
 
-# Проверка наличия SSL сертификатов
-if [ ! -f "nginx/certs/live/kanban.yourdomain.com/fullchain.pem" ]; then
-    echo "⚠️  SSL сертификаты не найдены"
-    echo "   Запустите ./ssl-setup.sh для получения сертификатов"
-    echo ""
-fi
+# Получение IP сервера
+SERVER_IP=$(hostname -I | awk '{print $1}')
 
 echo "=== Деплой завершен ==="
 echo ""
 echo "Доступные сервисы:"
-echo "  - Kanban Board:     https://kanban.yourdomain.com"
-echo "  - FKandu Dashboard: https://dashboard.yourdomain.com"
-echo "  - FKandu Files:     https://files.yourdomain.com"
+echo "  - Kanban Board:     http://${SERVER_IP}:3000"
+echo "  - FKandu Dashboard: http://${SERVER_IP}:8000"
+echo "  - FKandu Files:     http://${SERVER_IP}:8088"
 echo ""
 echo "Для просмотра логов: docker-compose logs -f"
 echo "Для остановки: docker-compose down"

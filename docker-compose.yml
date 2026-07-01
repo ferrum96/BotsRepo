@@ -1,42 +1,14 @@
 version: '3.8'
 
 services:
-  nginx:
-    image: nginx:alpine
-    container_name: nginx-proxy
-    restart: unless-stopped
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
-      - ./nginx/certs:/etc/letsencrypt:ro
-      - ./nginx/www:/var/www/certbot:ro
-    depends_on:
-      - kanban
-      - fkandu-bot
-      - fkandu-dashboard
-      - pubg-bot
-    networks:
-      - app-network
-    command: '/bin/sh -c ''while :; do sleep 6h & wait $${!}; nginx -s reload; done & nginx -g "daemon off;"'''
-
-  certbot:
-    image: certbot/certbot
-    container_name: certbot
-    volumes:
-      - ./nginx/certs:/etc/letsencrypt
-      - ./nginx/www:/var/www/certbot
-    entrypoint: "/bin/sh -c 'trap exit TERM; while :; do certbot renew; sleep 12h & wait $${!}; done;'"
-
   kanban:
     build:
       context: ./kanban_board
       dockerfile: Dockerfile
     container_name: kanban-board
     restart: unless-stopped
-    expose:
-      - "3000"
+    ports:
+      - "3000:3000"
     environment:
       - NODE_ENV=production
       - DATABASE_URL=file:/app/data/prod.db
@@ -51,8 +23,8 @@ services:
       dockerfile: Dockerfile
     container_name: fkandu-bot
     restart: unless-stopped
-    expose:
-      - "8088"
+    ports:
+      - "8088:8088"
     env_file:
       - ./fkandu_manager_bot/.env
     volumes:
@@ -66,8 +38,8 @@ services:
       dockerfile: Dockerfile.dashboard
     container_name: fkandu-dashboard
     restart: unless-stopped
-    expose:
-      - "8000"
+    ports:
+      - "8000:8000"
     env_file:
       - ./fkandu_manager_bot/.env
     volumes:
