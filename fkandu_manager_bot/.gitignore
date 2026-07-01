@@ -1,4 +1,5 @@
 .env
+!.env.example
 bot.log
 api.log
 db/leads.db

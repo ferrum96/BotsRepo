@@ -1,0 +1,85 @@
+version: '3.8'
+
+services:
+  nginx:
+    image: nginx:alpine
+    container_name: nginx-proxy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/certs:/etc/nginx/certs:ro
+    depends_on:
+      - kanban
+      - fkandu-bot
+      - fkandu-dashboard
+      - pubg-bot
+    networks:
+      - app-network
+
+  kanban:
+    build:
+      context: ./kanban_board
+      dockerfile: Dockerfile
+    container_name: kanban-board
+    restart: unless-stopped
+    expose:
+      - "3000"
+    environment:
+      - NODE_ENV=production
+      - DATABASE_URL=file:/app/data/prod.db
+    volumes:
+      - ./kanban_board/data:/app/data
+    networks:
+      - app-network
+
+  fkandu-bot:
+    build:
+      context: ./fkandu_manager_bot
+      dockerfile: Dockerfile
+    container_name: fkandu-bot
+    restart: unless-stopped
+    expose:
+      - "3001"
+    env_file:
+      - ./fkandu_manager_bot/.env
+    volumes:
+      - ./fkandu_manager_bot/db:/app/db
+    networks:
+      - app-network
+
+  fkandu-dashboard:
+    build:
+      context: ./fkandu_manager_bot
+      dockerfile: Dockerfile.dashboard
+    container_name: fkandu-dashboard
+    restart: unless-stopped
+    expose:
+      - "3002"
+    env_file:
+      - ./fkandu_manager_bot/.env
+    volumes:
+      - ./fkandu_manager_bot/db:/app/db
+    networks:
+      - app-network
+
+  pubg-bot:
+    build:
+      context: ./pubg_moderator_bot
+      dockerfile: Dockerfile
+    container_name: pubg-bot
+    restart: unless-stopped
+    expose:
+      - "3003"
+    env_file:
+      - ./pubg_moderator_bot/.env
+    volumes:
+      - ./pubg_moderator_bot/data:/app/data
+    networks:
+      - app-network
+
+networks:
+  app-network:
+    driver: bridge
