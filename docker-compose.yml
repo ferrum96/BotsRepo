@@ -34,16 +34,15 @@ services:
 
   fkandu-dashboard:
     build:
-      context: ./fkandu_manager_bot
-      dockerfile: Dockerfile.dashboard
+      context: ./fkandu_manager_bot/dashboard
+      dockerfile: Dockerfile
     container_name: fkandu-dashboard
     restart: unless-stopped
     ports:
-      - "8000:8000"
-    env_file:
-      - ./fkandu_manager_bot/.env
-    volumes:
-      - ./fkandu_manager_bot/db:/app/db
+      - "8000:3000"
+    environment:
+      - NODE_ENV=production
+      - API_URL=http://fkandu-bot:8000
     networks:
       - app-network
 
