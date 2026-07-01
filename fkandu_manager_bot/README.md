@@ -5,50 +5,75 @@ Telegram-бот и CRM-дашборд для канала **«Дети и Жел
 ## Структура
 
 ```
-├── .env                # Переменные окружения
-├── requirements.txt    # Зависимости
-├── db/
-│   └── leads.db        # SQLite база
-├── scripts/
-│   ├── bot.py          # Telegram-бот
-│   └── api.py          # API-сервер
-└── dashboard/
-    └── static/
-        └── index.html  # React-дашборд
+fkandu_manager_bot/
+├── bot/                   # Telegram-бот (aiogram)
+│   ├── main.py            # Точка входа + файловый сервер
+│   ├── config.py          # Конфигурация из .env
+│   ├── database.py        # SQLite
+│   ├── keyboards.py       # Кнопки
+│   └── handlers/
+│       └── lead_form.py   # Обработка заявок
+├── dashboard/
+│   ├── backend/           # FastAPI (API для дашборда)
+│   │   ├── api.py
+│   │   └── Dockerfile
+│   └── frontend/          # Next.js (дашборд)
+│       ├── src/
+│       │   ├── components/
+│       │   └── app/
+│       └── Dockerfile
+├── data/                  # SQLite база (leads.db)
+├── .env                   # Переменные окружения
+├── requirements.txt       # Python зависимости
+└── Dockerfile
 ```
 
-## Запуск
-
-```bash
-pip install -r requirements.txt
-
-# Терминал 1 — бот
-python3 scripts/bot.py
-
-# Терминал 2 — дашборд
-python3 scripts/api.py
-# → http://localhost:8000
-```
-
-## Что делает
+## Возможности
 
 - **Бот** — принимает заявки через Telegram (категория → товар → бюджет → сроки), оценивает лид, сохраняет в SQLite, уведомляет админа
+- **Файловый сервер** — отдаёт файлы из БД по URL (`/files/{file_id}`)
 - **Дашборд** — 5 страниц: метрики, канбан с drag-and-drop, список заявок с фильтрами, горячие лиды, аналитика
-- **Роутинг** — URL-хеши (#kanban, #leads, #hot, #analytics, #dashboard)
 
-## Деплой на сервер
+## Запуск (разработка)
 
 ```bash
-# 1. Загрузить проект на сервер
-scp -r . root@ваш-ip:/root/fkandu_manager_bot
+# 1. Установить зависимости
+pip install -r requirements.txt
 
 # 2. Настроить .env
-ssh root@ваш-ip
-cd /root/fkandu_manager_bot
-nano .env  # BOT_TOKEN=... ADMIN_ID=...
+cp .env.example .env
+# Заполните BOT_TOKEN, ADMIN_ID, HOSTNAME
 
-# 3. На DNS A-запись: crm.fkandu.ru → IP сервера
+# 3. Запустить бота (включает файловый сервер на порту 8088)
+python -m bot.main
 
-# 4. Запустить
-bash deploy/install.sh
+# 4. Запустить API дашборда (отдельный терминал)
+cd dashboard/backend
+pip install -r requirements.txt
+uvicorn api:app --host 0.0.0.0 --port 8000
+
+# 5. Запустить фронтенд дашборда (отдельный терминал)
+cd dashboard/frontend
+npm install
+npm run dev
 ```
+
+## Docker
+
+```bash
+# Из корня BotsRepo/
+docker-compose up -d --build
+```
+
+Сервисы:
+- `fkandu-bot` — бот + файловый сервер → порт 3001 (внешний) / 8088 (контейнер)
+- `fkandu-api` — FastAPI → порт 3002 / 8000
+- `fkandu-dashboard` — Next.js → порт 3003 / 3000
+
+## Переменные окружения
+
+| Переменная | Описание |
+|------------|----------|
+| `BOT_TOKEN` | Токен бота от @BotFather |
+| `ADMIN_ID` | Telegram ID администратора |
+| `HOSTNAME` | IP-адрес сервера (для файлового сервера) |

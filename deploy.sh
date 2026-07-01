@@ -18,7 +18,7 @@ echo ""
 # Создание директорий для данных
 echo "Создание директорий для данных..."
 mkdir -p kanban_board/data
-mkdir -p fkandu_manager_bot/db
+mkdir -p fkandu_manager_bot/data
 mkdir -p pubg_moderator_bot/data
 echo "✅ Директории созданы"
 echo ""
@@ -39,9 +39,10 @@ SERVER_IP=$(hostname -I | awk '{print $1}')
 echo "=== Деплой завершен ==="
 echo ""
 echo "Доступные сервисы:"
-echo "  - Kanban Board:     http://${SERVER_IP}:3000"
-echo "  - FKandu Dashboard: http://${SERVER_IP}:8000"
-echo "  - FKandu Files:     http://${SERVER_IP}:8088"
+echo "  - Kanban Board:      http://${SERVER_IP}:3000"
+echo "  - FKandu Bot Files:  http://${SERVER_IP}:3001"
+echo "  - FKandu API:        http://${SERVER_IP}:3002"
+echo "  - FKandu Dashboard:  http://${SERVER_IP}:3003"
 echo ""
 echo "Для просмотра логов: docker-compose logs -f"
 echo "Для остановки: docker-compose down"

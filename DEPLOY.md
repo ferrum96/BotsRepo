@@ -4,12 +4,22 @@
 
 ```
 BotsRepo/
-├── kanban_board/          # Next.js kanban доска (порт 3000)
-├── fkandu_manager_bot/    # Python бот + дашборд (порты 8088, 8000)
-├── pubg_moderator_bot/    # Python бот
-├── docker-compose.yml     # Основной файл деплоя
-├── deploy.sh             # Скрипт деплоя
-└── .dockerignore         # Игнорируемые файлы
+├── kanban_board/              # Kanban доска (Next.js + Prisma)
+│   ├── frontend/
+│   ├── backend/
+│   └── data/
+├── fkandu_manager_bot/        # Telegram бот + дашборд
+│   ├── bot/
+│   ├── dashboard/
+│   │   ├── backend/           # FastAPI
+│   │   └── frontend/          # Next.js
+│   └── data/
+├── pubg_moderator_bot/        # Telegram бот PUBG
+│   ├── bot/
+│   └── data/
+├── docker-compose.yml         # Основной файл деплоя
+├── deploy.sh                  # Скрипт деплоя
+└── DEPLOY.md                  # Эта документация
 ```
 
 ## Быстрый старт
@@ -34,20 +44,21 @@ cp pubg_moderator_bot/.env.example pubg_moderator_bot/.env
 
 ## Сервисы
 
-| Сервис | Описание | Порт |
-|--------|----------|------|
-| kanban-board | Kanban доска (Next.js) | 3000 |
-| fkandu-bot | Telegram бот FKandu | 8088 |
-| fkandu-dashboard | Дашборд FKandu (FastAPI) | 8000 |
-| pubg-bot | Telegram бот PUBG | - |
+| Сервис | Описание | Порт (внешний) |
+|--------|----------|----------------|
+| kanban-board | Kanban доска (Next.js + Prisma) | 3000 |
+| fkandu-bot | Telegram бот + файловый сервер | 3001 |
+| fkandu-api | API дашборда (FastAPI) | 3002 |
+| fkandu-dashboard | Дашборд (Next.js) | 3003 |
+| pubg-bot | Telegram бот PUBG | — |
 
 ## Доступ
 
-После деплоя сервисы доступны по адресам:
 ```
 http://your-server-ip:3000  # Kanban Board
-http://your-server-ip:8000  # FKandu Dashboard
-http://your-server-ip:8088  # FKandu Files
+http://your-server-ip:3001  # FKandu Files (файловый сервер бота)
+http://your-server-ip:3002  # FKandu API
+http://your-server-ip:3003  # FKandu Dashboard
 ```
 
 ## Команды
@@ -59,11 +70,11 @@ docker-compose up -d
 # Остановка всех сервисов
 docker-compose down
 
-# Просмотра логов
+# Просмотр логов
 docker-compose logs -f
 
 # Перезапуск конкретного сервиса
-docker-compose restart kanban
+docker-compose restart kanban-board
 
 # Сборка без кеша
 docker-compose build --no-cache
@@ -71,11 +82,11 @@ docker-compose build --no-cache
 
 ## Хранение данных
 
-| Сервис | Данные | Путь в контейнере |
-|--------|--------|-------------------|
-| kanban-board | SQLite БД | /app/data/prod.db |
-| fkandu | SQLite БД | /app/db/leads.db |
-| pubg-bot | Данные | /app/data/ |
+| Сервис | Данные | Путь на хосте |
+|--------|--------|---------------|
+| kanban-board | SQLite БД | kanban_board/data/prod.db |
+| fkandu | SQLite БД | fkandu_manager_bot/data/leads.db |
+| pubg-bot | SQLite БД | pubg_moderator_bot/data/bot.db |
 
 ## Устранение проблем
 
@@ -87,8 +98,8 @@ docker-compose build --no-cache
 
 ### Порты уже заняты
 
-Если порт уже используется другим сервисом, измените его в `docker-compose.yml`:
+Измените порт в `docker-compose.yml`:
 ```yaml
 ports:
-  - "3001:3000"  # Измените 3000 на 3001
+  - "3001:3000"  # Измените внешний порт
 ```
