@@ -31,6 +31,11 @@ export default function Home() {
   const [loading, setLoading] = useState(true);
   const [menuOpen, setMenuOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(true);
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   const setPage = (p: Page) => {
     window.location.hash = p;
@@ -82,6 +87,12 @@ export default function Home() {
 
   const currentPage = PAGES.find((p) => p.k === page);
 
+  const getMarginLeft = () => {
+    if (!mounted) return '40px';
+    if (typeof window !== 'undefined' && window.innerWidth < 768) return '0';
+    return collapsed ? '40px' : '224px';
+  };
+
   return (
     <div className="flex min-h-screen">
       <Sidebar
@@ -94,12 +105,8 @@ export default function Home() {
       />
 
       <main
-        className="flex-1"
-        style={
-          typeof window !== 'undefined' && window.innerWidth >= 768
-            ? { marginLeft: collapsed ? '40px' : '224px', transition: 'margin .3s' }
-            : {}
-        }
+        className="flex-1 transition-all duration-300"
+        style={{ marginLeft: getMarginLeft() }}
       >
         <div className="md:hidden sticky top-0 z-40 bg-white border-b border-gray-100 px-3 py-2.5 flex items-center gap-3 shadow-sm">
           <button onClick={() => setMenuOpen(true)} className="text-gray-600 text-xl">

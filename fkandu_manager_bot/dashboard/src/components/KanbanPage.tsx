@@ -151,7 +151,7 @@ export function KanbanPage({ leads, onRefresh, setPage }: KanbanPageProps) {
       <h1 className="text-xl md:text-2xl font-bold mb-3 md:mb-4">🗂 Статусы заявок</h1>
 
       <div
-        className="grid grid-cols-2 gap-2 md:flex md:gap-2 md:overflow-x-auto pb-4 kanban-touch"
+        className="flex gap-2 md:gap-2 md:overflow-x-auto pb-4 kanban-touch"
         style={{ minHeight: '400px', WebkitOverflowScrolling: 'touch' }}
       >
         {STATUSES.map((s) => (

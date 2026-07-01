@@ -18,7 +18,7 @@ export function Sidebar({ page, setPage, open, collapsed, onClose, onToggle }: S
 
   if (!isMobile && collapsed) {
     return (
-      <div className="fixed left-0 top-0 bottom-0 w-10 z-50 flex flex-col items-center bg-gradient-to-b from-rose-400 to-peach-400 text-white shadow-xl pt-4">
+      <div className="fixed left-0 top-0 bottom-0 w-10 z-50 flex flex-col items-center pt-4" style={{ background: 'linear-gradient(to bottom, #ff5c8a, #ff8c5a)' }}>
         <button
           onClick={onToggle}
           className="text-white text-lg mb-4 hover:bg-white/20 rounded-lg w-8 h-8 flex items-center justify-center transition-all"
@@ -43,7 +43,10 @@ export function Sidebar({ page, setPage, open, collapsed, onClose, onToggle }: S
       {isMobile && (
         <div className="overlay absolute inset-0 bg-black/40" onClick={onClose} />
       )}
-      <div className={`${isMobile ? 'absolute left-0 top-0 bottom-0 w-56 sidebar-open ' : ''}bg-gradient-to-b from-rose-400 to-peach-400 text-white shadow-xl flex flex-col h-full`}>
+      <div
+        className={`${isMobile ? 'absolute left-0 top-0 bottom-0 w-56 sidebar-open ' : ''}text-white shadow-xl flex flex-col h-full`}
+        style={{ background: 'linear-gradient(to bottom, #ff5c8a, #ff8c5a)' }}
+      >
         <div className="p-4 border-b border-white/20 flex items-center justify-between">
           <div>
             <h1 className="text-lg font-bold">🌸 CRM @fkandu</h1>

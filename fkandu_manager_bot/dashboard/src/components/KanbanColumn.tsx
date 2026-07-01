@@ -22,8 +22,8 @@ export function KanbanColumn({ status, leads, onDrop, touchOver, onTouchStart, s
     <div
       className="flex-shrink-0 rounded-xl p-1 md:p-1.5 bg-white shadow-sm border border-gray-100 overflow-hidden"
       style={{
-        width: typeof window !== 'undefined' && window.innerWidth >= 768 ? '185px' : 'auto',
-        minWidth: typeof window !== 'undefined' && window.innerWidth >= 768 ? '185px' : 'auto',
+        width: '185px',
+        minWidth: '185px',
       }}
       data-status={status}
       onDragOver={(e) => {
