@@ -1,8 +1,6 @@
 import sqlite3
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from typing import Optional
 from contextlib import contextmanager
@@ -19,9 +17,9 @@ app.add_middleware(
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DB_PATH = os.path.join(BASE_DIR, "db", "leads.db")
-STATIC_DIR = os.path.join(BASE_DIR, "dashboard", "static")
 
 os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
+
 
 @contextmanager
 def get_db():
@@ -110,14 +108,6 @@ def get_stats():
             "monthly_revenue": monthly,
             "category_revenue": cat_revenue,
         }
-
-
-@app.get("/")
-def serve_index():
-    return FileResponse(os.path.join(STATIC_DIR, "index.html"))
-
-
-app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 
 if __name__ == "__main__":
