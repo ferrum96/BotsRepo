@@ -1,0 +1,13 @@
+version: '3.8'
+
+services:
+  kanban:
+    build: .
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./data:/app/data
+    environment:
+      - DATABASE_URL=file:/app/data/prod.db
+      - NODE_ENV=production
+    restart: unless-stopped
