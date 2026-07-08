@@ -1,0 +1,44 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  .material-symbols-outlined {
+    font-variation-settings:
+      'FILL' 0,
+      'wght' 300,
+      'GRAD' 0,
+      'opsz' 24;
+  }
+
+  .icon-thin {
+    font-variation-settings:
+      'FILL' 0,
+      'wght' 200,
+      'GRAD' 0,
+      'opsz' 24;
+  }
+}
+
+@layer components {
+  .input-dark {
+    @apply bg-surface-2 border border-outline-level rounded py-2.5 px-4 text-body-sm text-on-surface focus:outline-none focus:border-electric transition-colors placeholder-on-surface-variant;
+  }
+
+  .input-light {
+    @apply bg-white border border-slate-200 rounded py-2.5 px-4 text-body-sm text-slate-800 focus:outline-none focus:border-electric focus:ring-1 focus:ring-electric/30 transition-colors placeholder-slate-400 shadow-sm;
+  }
+
+  .btn-primary {
+    @apply bg-electric text-black text-label-caps font-mono px-4 py-2 rounded hover:opacity-90 transition-opacity;
+  }
+
+  .btn-ghost {
+    @apply text-on-surface-variant hover:text-on-surface hover:bg-white/5 rounded transition-colors flex items-center justify-center w-9 h-9;
+  }
+}

@@ -41,6 +41,8 @@ def upgrade() -> None:
             sa.Column("level", sa.Integer(), nullable=False, server_default="0"),
             sa.Column("is_inactive", sa.Boolean(), nullable=False, server_default="0"),
             sa.Column("is_legacy", sa.Boolean(), nullable=False, server_default="0"),
+            sa.Column("last_match_at", sa.String(), nullable=True),
+            sa.Column("last_match_checked_at", sa.String(), nullable=True),
             sa.Column("created_at", sa.String(), nullable=False),
             sa.PrimaryKeyConstraint("user_id"),
         )
@@ -56,6 +58,12 @@ def upgrade() -> None:
         if not _column_exists("members", "is_legacy"):
             op.add_column(
                 "members", sa.Column("is_legacy", sa.Boolean(), nullable=False, server_default="0")
+            )
+        if not _column_exists("members", "last_match_at"):
+            op.add_column("members", sa.Column("last_match_at", sa.String(), nullable=True))
+        if not _column_exists("members", "last_match_checked_at"):
+            op.add_column(
+                "members", sa.Column("last_match_checked_at", sa.String(), nullable=True)
             )
 
     if not _table_exists("blacklist"):
@@ -99,6 +107,10 @@ def downgrade() -> None:
         op.drop_column("survey_progress", "level")
     if _column_exists("members", "is_legacy"):
         op.drop_column("members", "is_legacy")
+    if _column_exists("members", "last_match_checked_at"):
+        op.drop_column("members", "last_match_checked_at")
+    if _column_exists("members", "last_match_at"):
+        op.drop_column("members", "last_match_at")
     if _column_exists("members", "is_inactive"):
         op.drop_column("members", "is_inactive")
     if _column_exists("members", "level"):
