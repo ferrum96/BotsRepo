@@ -1,0 +1,17 @@
+[Unit]
+Description=PUBG Clan Telegram Bot
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/BotsRepo/pubg_moderator_bot
+EnvironmentFile=/root/BotsRepo/pubg_moderator_bot/.env
+EnvironmentFile=/root/BotsRepo/deploy/ports.env
+Environment=DATABASE_PATH=/root/BotsRepo/pubg_moderator_bot/data/bot.db
+ExecStart=/usr/bin/python3 -m bot.main
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

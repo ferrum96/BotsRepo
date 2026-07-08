@@ -1,0 +1,7 @@
+# Пример локального nginx-конфига для VPS (systemd-режим).
+#
+# Установка (один раз):
+#   cp nginx/nginx-systemd.conf /etc/nginx/nginx.conf
+#   nginx -t && systemctl reload nginx
+#
+# Или сохраните как nginx-local.conf (файл в .gitignore) и подключите вручную.

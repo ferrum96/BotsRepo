@@ -1,3 +1,7 @@
+# Локальная разработка: docker compose -f docker-compose.dev.yml up
+# Production на VPS: systemd — см. ../../DEPLOY.md
+# Этот файл (docker-compose.yml) — альтернативный Docker-prod, не используется при systemd-деплое.
+
 services:
   pubg-dashboard:
     build:

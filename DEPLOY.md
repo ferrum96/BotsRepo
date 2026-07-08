@@ -1,79 +1,123 @@
-# Деплой всех сервисов на VPS
+# Деплой на VPS (systemd)
 
-## Структура проекта
+> **Локальная разработка** — Docker: см. [DEV.md](./DEV.md)  
+> **Production на сервере** — systemd + nginx на хосте.
+
+## Схема
 
 ```
-BotsRepo/
-├── kanban_board/              # Kanban доска (Node.js)
-├── fkandu_manager_bot/        # Telegram бот + дашборд
-│   ├── bot/
-│   └── dashboard/
-│       ├── backend/           # FastAPI
-│       └── frontend/          # Next.js
-├── pubg_moderator_bot/        # Telegram бот PUBG
-├── nginx/                     # Nginx конфиг
-│   └── nginx.conf
-├── nginx-local.conf           # Nginx для systemd режима
-├── deploy.sh                  # Скрипт деплоя
-└── DEPLOY.md                  # Эта документация
+                    ┌─────────────────────────────────────┐
+  http://IP:444–448 │  nginx (systemd, nginx-systemd.conf) │
+                    └──────────────┬──────────────────────┘
+                                   │ 127.0.0.1
+         ┌─────────────────────────┼─────────────────────────┐
+         ▼                         ▼                         ▼
+   fkandu :3000              pubg-api :8080            kanban :3002
+   fkandu-api :8000          pubg-bot                 (+ bots)
+   fkandu-bot :8088
 ```
 
-## Быстрый старт
+**Не запускайте на сервере:**
+- `docker-compose.dev.yml` — только для локалки
+- `pubg_moderator_bot/docker-compose.yml` — альтернативный Docker-prod, конфликтует с systemd
+- второй nginx (`nginx/nginx.conf` в Docker) — порты 444–448 уже заняты host-nginx
 
-1. **Клонируйте репозиторий на сервер:**
+## Карта портов
+
+Публичные порты nginx **не меняются** — см. `deploy/ports.env`.
+
+| Публичный | Сервис | Внутренний (localhost) |
+|-----------|--------|------------------------|
+| **444** | fkandu-dashboard | **3000** |
+| **445** | fkandu-api | **8000** |
+| **446** | fkandu-bot (файлы) | **8088** |
+| **447** | PUBG dashboard | **8080** |
+| **448** | kanban | **3002** *(3000 занят fkandu)* |
+
+## Первичная настройка сервера
+
 ```bash
 git clone git@github.com:ferrum96/BotsRepo.git
 cd BotsRepo
-```
 
-2. **Создайте .env файлы:**
-```bash
 cp fkandu_manager_bot/.env.example fkandu_manager_bot/.env
 cp pubg_moderator_bot/.env.example pubg_moderator_bot/.env
-# Заполните переменные окружения
+mkdir -p pubg_moderator_bot/data
+
+# nginx на хосте (единственный reverse proxy)
+cp nginx/nginx-systemd.conf /etc/nginx/nginx.conf
+nginx -t && systemctl enable nginx && systemctl start nginx
+
+# первый деплой (unit-файлы копируются и включаются автоматически)
+./deploy.sh
 ```
 
-3. **Установите зависимости и соберите:**
+Unit-файлы из `systemd/` **`deploy.sh` копирует в `/etc/systemd/system/`**, делает `daemon-reload`, `enable` и `start` при первом запуске.
+
+## Деплой обновлений
+
 ```bash
 ./deploy.sh
 ```
 
-## Сервисы
+Скрипт: `git pull` → установка/обновление systemd units → сборка → `alembic` → restart/start сервисов → `nginx reload`.
 
-| Сервис | Описание | Порт | URL |
-|--------|----------|------|-----|
-| kanban-board | Kanban доска | :448 | http://IP:448 |
-| fkandu-dashboard | Дашборд (Next.js) | :444 | http://IP:444 |
-| fkandu-api | API дашборда (FastAPI) | :445 | http://IP:445 |
-| fkandu-bot | Telegram бот + файловый сервер | :446 | http://IP:446 |
-| pubg-api | API дашборда PUBG (FastAPI) | :8080 | http://IP:8080 |
-| pubg-bot | Telegram бот PUBG | — | — |
-| pubg-dashboard | Дашборд PUBG (React) | :447 | http://IP:447 |
-
-Все сервисы проксируются через **Nginx**.
-
-## Управление сервисами (systemd)
+## Управление
 
 ```bash
-# Статус всех сервисов
 systemctl status kanban fkandu-dashboard fkandu-api fkandu-bot pubg-api pubg-bot
-
-# Перезапуск конкретного сервиса
-systemctl restart kanban
-
-# Логи в реальном времени
-journalctl -u kanban -f
-journalctl -u fkandu-bot -f
 journalctl -u pubg-api -f
-
-# Деплой изменений
-./deploy.sh
+systemctl restart pubg-api
 ```
 
-## Хранение данных
+## URL
 
-| Сервис | Данные | Путь |
-|--------|--------|------|
-| kanban-board | SQLite БД | kanban_board/data/kanban.db |
-| fkandu | SQLite БД | fkandu_manager_bot/data/leads.db |
-| pubg-bot | SQLite БД | pubg_moderator_bot/data/bot.db |
+| URL | Описание |
+|-----|----------|
+| http://IP:444 | FKandu dashboard |
+| http://IP:445 | FKandu API |
+| http://IP:446 | FKandu файлы |
+| http://IP:447 | PUBG clan dashboard |
+| http://IP:448 | Kanban |
+
+## Данные
+
+| Сервис | SQLite |
+|--------|--------|
+| kanban | `kanban_board/data/kanban.db` |
+| fkandu | `fkandu_manager_bot/data/leads.db` |
+| pubg | `pubg_moderator_bot/data/bot.db` |
+
+## Устранение 502 на :447
+
+502 = nginx работает, но **backend не отвечает** на `127.0.0.1:8080`.
+
+```bash
+# 1. Статус pubg-api
+systemctl status pubg-api
+journalctl -u pubg-api -n 50 --no-pager
+
+# 2. Отвечает ли API напрямую
+curl -v http://127.0.0.1:8080/health
+
+# 3. Nginx проксирует на localhost (не host.docker.internal)
+grep pubg_dashboard /etc/nginx/nginx.conf
+# должно быть: server 127.0.0.1:8080;
+
+# 4. Обновить конфиг и перезапустить
+cp nginx/nginx-systemd.conf /etc/nginx/nginx.conf
+nginx -t && systemctl reload nginx
+systemctl restart pubg-api
+```
+
+Частые причины:
+- нет или пустой `pubg_moderator_bot/.env` (нужны `BOT_TOKEN`, `GROUP_ID`)
+- не собран фронт (`dashboard/frontend/dist` — делает `deploy.sh`)
+- старый nginx-конфиг с `host.docker.internal` вместо `127.0.0.1`
+
+## PUBG — переменные окружения
+
+| Переменная | Значение |
+|------------|----------|
+| `DASHBOARD_PORT` | `8080` |
+| `DASHBOARD_API_KEY` | Ключ для POST из дашборда |

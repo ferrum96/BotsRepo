@@ -25,6 +25,6 @@ if (existsSync('./dist/client')) {
   app.use('/*', serveStatic({ root: './dist/client' }))
 }
 
-serve({ fetch: app.fetch, port: 3000 }, (info) => {
+serve({ fetch: app.fetch, port: Number(process.env.PORT) || 3000 }, (info) => {
   console.log(`Server running on http://localhost:${info.port}`)
 })

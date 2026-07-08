@@ -6,7 +6,7 @@ services:
     container_name: fkandu-dashboard
     restart: unless-stopped
     ports:
-      - "3000:3000"
+      - "3010:3000"
     volumes:
       - ./dashboard/frontend/src:/app/src
       - ./dashboard/frontend/public:/app/public
@@ -23,7 +23,7 @@ services:
     container_name: fkandu-api
     restart: unless-stopped
     ports:
-      - "8000:8000"
+      - "8010:8000"
     volumes:
       - ./dashboard/backend:/app
     environment:

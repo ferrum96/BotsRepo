@@ -1,0 +1,17 @@
+[Unit]
+Description=FKandu Dashboard (Next.js)
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/BotsRepo/fkandu_manager_bot/dashboard/frontend/.next/standalone
+EnvironmentFile=/root/BotsRepo/deploy/ports.env
+Environment=PORT=3000
+Environment=HOSTNAME=0.0.0.0
+ExecStart=/usr/bin/node server.js
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

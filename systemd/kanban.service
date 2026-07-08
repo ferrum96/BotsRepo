@@ -1,0 +1,16 @@
+[Unit]
+Description=Kanban Board
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/BotsRepo/kanban_board
+EnvironmentFile=/root/BotsRepo/deploy/ports.env
+Environment=PORT=3002
+ExecStart=/usr/bin/node dist/server/index.js
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

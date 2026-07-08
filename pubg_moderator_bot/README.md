@@ -88,40 +88,20 @@ npm run build
 
 ## Docker
 
-### Production (Docker Compose)
+### Development (локально)
 
 ```bash
 cd pubg_moderator_bot
-# frontend собирается внутри образа, node_modules не нужны на хосте
-docker compose up -d
+docker compose -f docker-compose.dev.yml up --build
 ```
 
-Запускаются сервисы:
-- `pubg-bot` — Telegram бот
-- `pubg-api` — FastAPI backend на порту 8080
-- `pubg-dashboard` — статический frontend (nginx) на порту 80
-- `nginx` — reverse proxy на порту 447
+См. [DEV.md](../DEV.md) — порты **5174** (UI) и **8081** (API).
 
-### Development (Docker Compose)
+### Production на VPS
 
-```bash
-cd pubg_moderator_bot
-docker compose -f docker-compose.dev.yml up -d
-```
+Используется **systemd**, не Docker — см. [DEPLOY.md](../DEPLOY.md).
 
-Запускаются сервисы:
-- `pubg-dashboard` — Vite dev-server на порту 5173
-- `pubg-api` — FastAPI с `--reload` на порту 8080
-- `pubg-bot` — Telegram бот в `network_mode: host` с `watchmedo`
-
-В режиме разработки фронтенда:
-```bash
-cd dashboard/frontend
-cp .env.example .env.local
-# при необходимости добавьте DASHBOARD_API_KEY в VITE_DASHBOARD_API_KEY
-npm run dev
-```
-Vite dev-server проксирует `/api` и `/health` на `http://localhost:8080` (или на `VITE_API_URL`).
+Файл `docker-compose.yml` (без `.dev`) — альтернативный Docker-prod, **не используется** при systemd-деплое.
 
 ## Безопасность дашборда
 

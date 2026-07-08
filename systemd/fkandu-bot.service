@@ -1,0 +1,16 @@
+[Unit]
+Description=FKandu Telegram Bot + File Server
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/BotsRepo/fkandu_manager_bot
+EnvironmentFile=/root/BotsRepo/fkandu_manager_bot/.env
+EnvironmentFile=/root/BotsRepo/deploy/ports.env
+ExecStart=/usr/bin/python3 -m bot.main
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

@@ -1,3 +1,6 @@
+# Локальная разработка — см. ../../DEV.md
+# Production на VPS — systemd, не этот compose.
+
 services:
   pubg-dashboard:
     build:
@@ -6,7 +9,7 @@ services:
     container_name: pubg-dashboard
     restart: unless-stopped
     ports:
-      - "5173:5173"
+      - "5174:5174"
     volumes:
       - ./dashboard/frontend/src:/app/src
       - ./dashboard/frontend/public:/app/public
@@ -15,6 +18,7 @@ services:
       - ./.env
     environment:
       - NODE_ENV=development
+      - VITE_DEV_PORT=5174
       - DEV_API_TARGET=http://pubg-api:8080
       - VITE_DASHBOARD_API_KEY=${DASHBOARD_API_KEY}
 
@@ -25,7 +29,7 @@ services:
     container_name: pubg-api
     restart: unless-stopped
     ports:
-      - "8080:8080"
+      - "8081:8080"
     env_file:
       - ./.env
     volumes:
@@ -36,6 +40,7 @@ services:
       - ./alembic.ini:/app/alembic.ini
     environment:
       - DATABASE_PATH=/app/data/bot.db
+      - DASHBOARD_PORT=8080
     command: ["sh", "-c", "alembic upgrade head && uvicorn dashboard.backend.main:app --host 0.0.0.0 --port 8080 --reload"]
 
   pubg-bot:
