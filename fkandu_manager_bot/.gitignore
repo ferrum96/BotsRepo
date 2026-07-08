@@ -1,0 +1,40 @@
+# Environment
+.env
+!.env.example
+
+# Logs
+bot.log
+api.log
+
+# Database
+*.db
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# Frontend (dashboard/frontend/)
+dashboard/frontend/.next/
+dashboard/frontend/node_modules/
+dashboard/frontend/out/
+dashboard/frontend/build/
+dashboard/frontend/.vercel
+dashboard/frontend/*.tsbuildinfo
+dashboard/frontend/next-env.d.ts
+
+# Backend (dashboard/backend/)
+dashboard/backend/__pycache__/
+dashboard/backend/*.pyc
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db

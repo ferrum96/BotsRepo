@@ -1,0 +1,13 @@
+services:
+  pubg-bot:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    container_name: pubg-bot
+    restart: unless-stopped
+    network_mode: host
+    env_file:
+      - ./.env
+    volumes:
+      - ./bot:/app/bot
+      - ./data:/app/data

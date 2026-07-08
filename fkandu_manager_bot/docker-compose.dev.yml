@@ -1,0 +1,45 @@
+services:
+  fkandu-dashboard:
+    build:
+      context: ./dashboard/frontend
+      dockerfile: Dockerfile.dev
+    container_name: fkandu-dashboard
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./dashboard/frontend/src:/app/src
+      - ./dashboard/frontend/public:/app/public
+    environment:
+      - NODE_ENV=development
+      - PORT=3000
+      - HOSTNAME=0.0.0.0
+      - API_BASE_URL=http://fkandu-api:8000
+
+  fkandu-api:
+    build:
+      context: ./dashboard/backend
+      dockerfile: Dockerfile.dev
+    container_name: fkandu-api
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./dashboard/backend:/app
+    environment:
+      - DB_PATH=/app/data/leads.db
+
+  fkandu-bot:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    container_name: fkandu-bot
+    restart: unless-stopped
+    network_mode: host
+    env_file:
+      - .env
+    environment:
+      - DB_PATH=/app/data/leads.db
+    volumes:
+      - ./bot:/app/bot
+      - ./data:/app/data

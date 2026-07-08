@@ -1,0 +1,9 @@
+.env
+!.env.example
+credentials.json
+*.db
+data/
+__pycache__/
+*.pyc
+.venv/
+.DS_Store
