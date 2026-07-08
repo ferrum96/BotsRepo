@@ -5,8 +5,8 @@ from logging.config import fileConfig
 from sqlalchemy import engine_from_config, pool
 
 from alembic import context
-from bot.api.models import Base, get_db_url
 from bot.config import Config
+from dashboard.backend.models import Base, get_db_url
 
 # Load config from alembic.ini.
 config = context.config

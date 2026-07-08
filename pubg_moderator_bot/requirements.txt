@@ -1,6 +1,11 @@
 python-telegram-bot[job-queue]==21.10
 python-dotenv==1.0.1
-gspread==6.1.4
-google-auth==2.37.0
 aiosqlite==0.20.0
 aiohttp==3.11.18
+fastapi==0.115.6
+uvicorn[standard]==0.32.1
+sqlalchemy==2.0.36
+alembic==1.14.0
+pydantic==2.10.3
+requests==2.32.3
+httpx==0.28.1

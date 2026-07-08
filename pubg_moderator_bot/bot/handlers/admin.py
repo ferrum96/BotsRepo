@@ -12,74 +12,12 @@ from telegram.ext import ContextTypes
 
 from bot import messages as msg
 from bot.database import Database
+from bot.group_titles import assign_game_nick_title, remove_from_group_header
 
 if TYPE_CHECKING:
     from bot.config import Config
 
 logger = logging.getLogger(__name__)
-
-# Telegram ограничивает custom_title 16 символами (UTF-16 code units).
-CUSTOM_TITLE_MAX_LEN = 16
-
-
-def _sanitize_custom_title(value: str) -> str:
-    """Trim and clip the title to fit Telegram's custom_title limit."""
-    cleaned = (value or "").strip()
-    if not cleaned:
-        return ""
-    encoded = cleaned.encode("utf-16-le")
-    if len(encoded) // 2 <= CUSTOM_TITLE_MAX_LEN:
-        return cleaned
-    return encoded[: CUSTOM_TITLE_MAX_LEN * 2].decode("utf-16-le", errors="ignore")
-
-
-async def _assign_game_nick_title(
-    bot: Bot, chat_id: int, user_id: int, game_nick: str
-) -> bool:
-    """Promote user to admin and set custom_title equal to their game nick.
-
-    Returns True on success. Requires the bot to have can_promote_members
-    in a supergroup; silently fails (with log) in unsupported chats.
-    """
-    title = _sanitize_custom_title(game_nick)
-    if not title:
-        return False
-
-    try:
-        await bot.promote_chat_member(
-            chat_id=chat_id,
-            user_id=user_id,
-            is_anonymous=False,
-            can_manage_chat=False,
-            can_change_info=False,
-            can_post_messages=False,
-            can_edit_messages=False,
-            can_delete_messages=False,
-            can_invite_users=True,
-            can_restrict_members=False,
-            can_pin_messages=False,
-            can_promote_members=False,
-            can_manage_video_chats=False,
-        )
-        await bot.set_chat_administrator_custom_title(
-            chat_id=chat_id,
-            user_id=user_id,
-            custom_title=title,
-        )
-        logger.info(
-            "Custom title '%s' set for user %s in chat %s",
-            title,
-            user_id,
-            chat_id,
-        )
-        return True
-    except (BadRequest, Forbidden, TelegramError):
-        logger.exception(
-            "Failed to set custom title for user %s in chat %s",
-            user_id,
-            chat_id,
-        )
-        return False
 
 
 def _get_db(context: ContextTypes.DEFAULT_TYPE) -> Database:
@@ -88,6 +26,47 @@ def _get_db(context: ContextTypes.DEFAULT_TYPE) -> Database:
 
 def _get_config(context: ContextTypes.DEFAULT_TYPE) -> "Config":
     return context.application.bot_data["config"]
+
+
+async def sync_group_members_state(
+    bot: Bot,
+    db: Database,
+    config: "Config",
+) -> dict[str, int]:
+    """Sync actual Telegram group presence for known clan members."""
+    members = await db.get_all_members()
+    admin_ids = set(config.admin_ids)
+    present = 0
+    missing = 0
+    blacklisted = 0
+    errors = 0
+
+    for member in members:
+        try:
+            chat_member = await bot.get_chat_member(config.group_id, member.user_id)
+        except (BadRequest, Forbidden, TelegramError):
+            logger.exception("Failed to fetch chat member %s", member.user_id)
+            errors += 1
+            continue
+
+        if chat_member.status in (ChatMemberStatus.LEFT, ChatMemberStatus.BANNED):
+            await db.untrack_group_member(member.user_id)
+            missing += 1
+            if member.user_id not in admin_ids:
+                await db.add_to_blacklist(member.user_id, "removed_from_group")
+                blacklisted += 1
+            continue
+
+        await db.track_group_member(member.user_id)
+        present += 1
+
+    return {
+        "total": len(members),
+        "present": present,
+        "missing": missing,
+        "blacklisted": blacklisted,
+        "errors": errors,
+    }
 
 
 def _is_admin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
@@ -281,6 +260,12 @@ async def cmd_kick_non_members(
             continue
 
         try:
+            await remove_from_group_header(
+                bot_token=config.bot_token,
+                chat_id=config.group_id,
+                user_id=user_id,
+                bot=bot,
+            )
             await bot.ban_chat_member(config.group_id, user_id)
             await bot.unban_chat_member(config.group_id, user_id)
             await db.add_to_blacklist(user_id, "not_in_clan_kicked")
@@ -311,6 +296,7 @@ async def cmd_help_admin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         "/blacklist — чёрный список\n"
         "/unblacklist &lt;user_id&gt; — снять блокировку\n"
         "/kick_non_members — удалить не-участников из группы\n"
+        "/sync_group — синхронизировать фактический состав группы\n"
         "/assign_titles — проставить игровые ники как теги "
         "всем участникам группы\n"
         "/admin_help — эта справка"
@@ -382,7 +368,7 @@ async def cmd_assign_titles(
             not_in_group += 1
             continue
 
-        ok = await _assign_game_nick_title(
+        ok = await assign_game_nick_title(
             bot, config.group_id, member.user_id, member.game_nick
         )
         if ok:
@@ -397,6 +383,32 @@ async def cmd_assign_titles(
         f"Нет в группе: {not_in_group}\n"
         f"Пропущено (админы / без ника): {skipped}\n"
         f"Ошибок: {failed}"
+    )
+
+
+async def cmd_sync_group(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    """Force sync of Telegram group state for members in DB."""
+    if not _is_admin(update, context):
+        await _reply_admin_only(update)
+        return
+    if not update.message:
+        return
+
+    config = _get_config(context)
+    db = _get_db(context)
+    await update.message.reply_text(
+        "Синхронизирую фактический состав Telegram-группы…"
+    )
+    result = await sync_group_members_state(context.bot, db, config)
+    await update.message.reply_text(
+        "Синхронизация завершена.\n"
+        f"Проверено участников клана: {result['total']}\n"
+        f"Сейчас в группе: {result['present']}\n"
+        f"Отсутствуют в группе: {result['missing']}\n"
+        f"Добавлено в blacklist: {result['blacklisted']}\n"
+        f"Ошибок: {result['errors']}"
     )
 
 
@@ -435,9 +447,24 @@ async def on_chat_member_update(
     joined_statuses = (ChatMemberStatus.MEMBER, ChatMemberStatus.RESTRICTED)
     if new_status in joined_statuses and old_status not in joined_statuses:
         await db.track_group_member(user.id)
+
+        if not await db.is_member(user.id):
+            progress = await db.get_progress(user.id)
+            if progress and progress.step == "completed":
+                await db.save_member(
+                    user_id=user.id,
+                    tg_username=user.username,
+                    tg_first_name=user.first_name,
+                    game_nick=progress.game_nick or "",
+                    real_name=progress.real_name or "",
+                    discord_nick=progress.discord_nick,
+                    perspective=progress.perspective or "Mixed",
+                )
+                await db.clear_progress(user.id)
+
         member = await db.get_member(user.id)
         if member and member.game_nick:
-            await _assign_game_nick_title(
+            await assign_game_nick_title(
                 context.bot,
                 config.group_id,
                 user.id,

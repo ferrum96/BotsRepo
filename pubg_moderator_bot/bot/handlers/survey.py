@@ -17,12 +17,10 @@ from telegram.ext import (
 
 from bot import messages as msg
 from bot.database import Database, Member, SurveyProgress
-from bot.google_sheets import SheetsSync
 from bot.keyboards import (
     activity_keyboard,
     age_keyboard,
     join_clan_keyboard,
-    level_keyboard,
     perspective_keyboard,
 )
 
@@ -34,13 +32,12 @@ logger = logging.getLogger(__name__)
 # Conversation states
 (
     AGE,
-    LEVEL,
     ACTIVITY,
     GAME_NICK,
     REAL_NAME,
     DISCORD,
     PERSPECTIVE,
-) = range(7)
+) = range(6)
 
 
 def _get_db(context: ContextTypes.DEFAULT_TYPE) -> Database:
@@ -51,15 +48,11 @@ def _get_config(context: ContextTypes.DEFAULT_TYPE) -> "Config":
     return context.application.bot_data["config"]
 
 
-def _get_sheets(context: ContextTypes.DEFAULT_TYPE) -> SheetsSync:
-    return context.application.bot_data["sheets"]
-
-
 async def _next_progress(
     context: ContextTypes.DEFAULT_TYPE,
     user_id: int,
     step: str,
-    **fields: str | None,
+    **fields: str | int | None,
 ) -> SurveyProgress:
     db = _get_db(context)
     current = await db.get_progress(user_id)
@@ -71,6 +64,7 @@ async def _next_progress(
         discord_nick=fields.get(
             "discord_nick", current.discord_nick if current else None
         ),
+        perspective=fields.get("perspective", current.perspective if current else None),
         attempts=current.attempts if current else 0,
     )
     await db.set_progress(progress)
@@ -90,6 +84,14 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         return ConversationHandler.END
 
     if await db.is_member(user.id):
+        await update.message.reply_text(
+            msg.ALREADY_PASSED,
+            reply_markup=join_clan_keyboard(config),
+        )
+        return ConversationHandler.END
+
+    progress = await db.get_progress(user.id)
+    if progress and progress.step == "completed":
         await update.message.reply_text(
             msg.ALREADY_PASSED,
             reply_markup=join_clan_keyboard(config),
@@ -121,24 +123,57 @@ async def _handle_rejection(
         return ConversationHandler.END
 
     await query.answer()
-    db = _get_db(context)
-    config = _get_config(context)
     user_id = query.from_user.id
+    result = await _record_failed_attempt(context, user_id)
 
-    attempts = await db.increment_attempts(user_id)
-    remaining = config.max_survey_attempts - attempts
-
-    if remaining <= 0:
-        await db.add_to_blacklist(user_id, "survey_failed")
+    if result["blacklisted"]:
         await query.edit_message_text(
             f"{reject_message}\n\n{msg.ATTEMPTS_EXHAUSTED}"
         )
         return ConversationHandler.END
 
     await query.edit_message_text(
-        f"{reject_message}\n\n{msg.ATTEMPT_FAILED.format(remaining=remaining)}"
+        f"{reject_message}\n\n{msg.ATTEMPT_FAILED.format(remaining=result['remaining'])}"
     )
     return ConversationHandler.END
+
+
+async def _handle_rejection_message(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    reject_message: str,
+) -> int:
+    message = update.message
+    user = update.effective_user
+    if not message or not user:
+        return ConversationHandler.END
+
+    result = await _record_failed_attempt(context, user.id)
+
+    if result["blacklisted"]:
+        await message.reply_text(f"{reject_message}\n\n{msg.ATTEMPTS_EXHAUSTED}")
+        return ConversationHandler.END
+
+    await message.reply_text(
+        f"{reject_message}\n\n{msg.ATTEMPT_FAILED.format(remaining=result['remaining'])}"
+    )
+    return ConversationHandler.END
+
+
+async def _record_failed_attempt(
+    context: ContextTypes.DEFAULT_TYPE, user_id: int
+) -> dict:
+    db = _get_db(context)
+    config = _get_config(context)
+
+    attempts = await db.increment_attempts(user_id)
+    remaining = config.max_survey_attempts - attempts
+
+    if remaining <= 0:
+        await db.add_to_blacklist(user_id, "survey_failed")
+        return {"blacklisted": True, "remaining": 0}
+
+    return {"blacklisted": False, "remaining": remaining}
 
 
 async def age_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -150,26 +185,7 @@ async def age_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
         return await _handle_rejection(update, context, msg.REJECT_AGE)
 
     await query.answer()
-    await query.edit_message_text(msg.ASK_LEVEL, reply_markup=level_keyboard())
-
-    await _next_progress(context, query.from_user.id, "level")
-    return LEVEL
-
-
-async def level_callback(
-    update: Update, context: ContextTypes.DEFAULT_TYPE
-) -> int:
-    query = update.callback_query
-    if not query or not query.data or not query.from_user:
-        return ConversationHandler.END
-
-    if query.data == "level:under":
-        return await _handle_rejection(update, context, msg.REJECT_LEVEL)
-
-    await query.answer()
-    await query.edit_message_text(
-        msg.ASK_ACTIVITY, reply_markup=activity_keyboard()
-    )
+    await query.edit_message_text(msg.ASK_ACTIVITY, reply_markup=activity_keyboard())
 
     await _next_progress(context, query.from_user.id, "activity")
     return ACTIVITY
@@ -188,7 +204,8 @@ async def activity_callback(
     await query.answer()
     await query.edit_message_text(msg.ASK_GAME_NICK)
 
-    await _next_progress(context, query.from_user.id, "game_nick")
+    user_id = query.from_user.id
+    await _next_progress(context, user_id, "game_nick")
     return GAME_NICK
 
 
@@ -203,7 +220,8 @@ async def game_nick_input(
         await update.message.reply_text("Ник слишком короткий. Попробуй ещё раз.")
         return GAME_NICK
 
-    await _next_progress(context, update.effective_user.id, "real_name", game_nick=text)
+    user_id = update.effective_user.id
+    await _next_progress(context, user_id, "real_name", game_nick=text)
     await update.message.reply_text(msg.ASK_REAL_NAME)
     return REAL_NAME
 
@@ -219,10 +237,11 @@ async def real_name_input(
         await update.message.reply_text("Имя слишком короткое. Попробуй ещё раз.")
         return REAL_NAME
 
-    prev = await _get_db(context).get_progress(update.effective_user.id)
+    user_id = update.effective_user.id
+    prev = await _get_db(context).get_progress(user_id)
     await _next_progress(
         context,
-        update.effective_user.id,
+        user_id,
         "discord",
         game_nick=prev.game_nick if prev else None,
         real_name=text,
@@ -240,10 +259,11 @@ async def discord_input(
     text = update.message.text.strip()
     discord_nick = None if text in ("—", "-", "нет", "Нет") else text
 
-    prev = await _get_db(context).get_progress(update.effective_user.id)
+    user_id = update.effective_user.id
+    prev = await _get_db(context).get_progress(user_id)
     await _next_progress(
         context,
-        update.effective_user.id,
+        user_id,
         "perspective",
         game_nick=prev.game_nick if prev else None,
         real_name=prev.real_name if prev else None,
@@ -276,7 +296,6 @@ async def perspective_callback(
 
     db = _get_db(context)
     config = _get_config(context)
-    sheets = _get_sheets(context)
     user = query.from_user
 
     progress = await db.get_progress(user.id)
@@ -286,33 +305,15 @@ async def perspective_callback(
         )
         return ConversationHandler.END
 
-    await db.save_member(
-        user_id=user.id,
-        tg_username=user.username,
-        tg_first_name=user.first_name,
+    await _next_progress(
+        context,
+        user.id,
+        "completed",
         game_nick=progress.game_nick,
         real_name=progress.real_name,
         discord_nick=progress.discord_nick,
         perspective=perspective,
     )
-
-    member = Member(
-        user_id=user.id,
-        tg_username=user.username,
-        tg_first_name=user.first_name,
-        game_nick=progress.game_nick,
-        real_name=progress.real_name,
-        discord_nick=progress.discord_nick,
-        perspective=perspective,
-        created_at="",
-    )
-    members = await db.get_all_members()
-    for m in members:
-        if m.user_id == user.id:
-            member = m
-            break
-
-    sheets.append_member(member)
 
     await query.edit_message_text(
         msg.SURVEY_COMPLETE,
@@ -332,7 +333,6 @@ def build_survey_handler() -> ConversationHandler:
         entry_points=[CommandHandler("start", start)],
         states={
             AGE: [CallbackQueryHandler(age_callback, pattern=r"^age:")],
-            LEVEL: [CallbackQueryHandler(level_callback, pattern=r"^level:")],
             ACTIVITY: [
                 CallbackQueryHandler(activity_callback, pattern=r"^activity:")
             ],

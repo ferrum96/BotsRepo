@@ -9,6 +9,9 @@ from typing import Optional
 
 import aiosqlite
 
+LEGACY_JOIN_DATE = "2001-01-01"
+LAST_MATCH_FORMAT = "%Y-%m-%d %H:%M:%S"
+
 
 @dataclass
 class Member:
@@ -19,6 +22,10 @@ class Member:
     real_name: str
     discord_nick: Optional[str]
     perspective: str
+    is_inactive: bool
+    is_legacy: bool
+    last_match_at: Optional[str]
+    last_match_checked_at: Optional[str]
     created_at: str
 
 
@@ -29,6 +36,7 @@ class SurveyProgress:
     game_nick: Optional[str] = None
     real_name: Optional[str] = None
     discord_nick: Optional[str] = None
+    perspective: Optional[str] = None
     attempts: int = 0
 
 
@@ -56,6 +64,10 @@ class Database:
                 real_name TEXT NOT NULL,
                 discord_nick TEXT,
                 perspective TEXT NOT NULL,
+                is_inactive INTEGER NOT NULL DEFAULT 0,
+                is_legacy INTEGER NOT NULL DEFAULT 0,
+                last_match_at TEXT,
+                last_match_checked_at TEXT,
                 created_at TEXT NOT NULL
             );
 
@@ -71,6 +83,7 @@ class Database:
                 game_nick TEXT,
                 real_name TEXT,
                 discord_nick TEXT,
+                perspective TEXT,
                 attempts INTEGER NOT NULL DEFAULT 0
             );
 
@@ -81,6 +94,7 @@ class Database:
             """
         )
         await self._migrate_channel_members_table(db)
+        await self._migrate_dashboard_columns(db)
         await db.commit()
 
     async def _migrate_channel_members_table(
@@ -103,6 +117,38 @@ class Database:
             """
         )
         await db.execute("DROP TABLE channel_members")
+
+    async def _migrate_dashboard_columns(
+        self, db: aiosqlite.Connection
+    ) -> None:
+        """Ensure legacy tables have new dashboard columns."""
+        cursor = await db.execute(
+            "SELECT name FROM pragma_table_info('members')"
+        )
+        columns = {row["name"] for row in await cursor.fetchall()}
+        if "is_inactive" not in columns:
+            await db.execute(
+                "ALTER TABLE members ADD COLUMN is_inactive INTEGER NOT NULL DEFAULT 0"
+            )
+        if "is_legacy" not in columns:
+            await db.execute(
+                "ALTER TABLE members ADD COLUMN is_legacy INTEGER NOT NULL DEFAULT 0"
+            )
+        if "last_match_at" not in columns:
+            await db.execute("ALTER TABLE members ADD COLUMN last_match_at TEXT")
+        if "last_match_checked_at" not in columns:
+            await db.execute(
+                "ALTER TABLE members ADD COLUMN last_match_checked_at TEXT"
+            )
+
+        cursor = await db.execute(
+            "SELECT name FROM pragma_table_info('survey_progress')"
+        )
+        columns = {row["name"] for row in await cursor.fetchall()}
+        if "perspective" not in columns:
+            await db.execute(
+                "ALTER TABLE survey_progress ADD COLUMN perspective TEXT"
+            )
 
     async def is_blacklisted(self, user_id: int) -> bool:
         db = await self.connect()
@@ -178,8 +224,9 @@ class Database:
             """
             INSERT INTO members (
                 user_id, tg_username, tg_first_name,
-                game_nick, real_name, discord_nick, perspective, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                game_nick, real_name, discord_nick, perspective,
+                is_inactive, is_legacy, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(user_id) DO UPDATE SET
                 tg_username = excluded.tg_username,
                 tg_first_name = excluded.tg_first_name,
@@ -197,6 +244,8 @@ class Database:
                 real_name,
                 discord_nick,
                 perspective,
+                0,
+                0,
                 now,
             ),
         )
@@ -212,6 +261,47 @@ class Database:
         )
         rows = await cursor.fetchall()
         return [_row_to_member(r) for r in rows]
+
+    async def get_active_members(self) -> list[Member]:
+        db = await self.connect()
+        cursor = await db.execute(
+            """
+            SELECT * FROM members
+            WHERE user_id NOT IN (SELECT user_id FROM blacklist)
+            ORDER BY created_at DESC
+            """
+        )
+        rows = await cursor.fetchall()
+        return [_row_to_member(r) for r in rows]
+
+    async def set_member_legacy(self, user_id: int, legacy: bool) -> bool:
+        db = await self.connect()
+        cursor = await db.execute(
+            """
+            UPDATE members SET is_legacy = ?
+            WHERE user_id = ?
+            """,
+            (1 if legacy else 0, user_id),
+        )
+        await db.commit()
+        return cursor.rowcount > 0
+
+    async def set_member_last_match(
+        self, user_id: int, last_match_at: Optional[str]
+    ) -> bool:
+        """Save last match datetime."""
+        checked_at = datetime.now(timezone.utc).strftime(LAST_MATCH_FORMAT)
+        db = await self.connect()
+        cursor = await db.execute(
+            """
+            UPDATE members
+            SET last_match_at = ?, last_match_checked_at = ?
+            WHERE user_id = ?
+            """,
+            (last_match_at, checked_at, user_id),
+        )
+        await db.commit()
+        return cursor.rowcount > 0
 
     async def search_members(self, query: str) -> list[Member]:
         pattern = f"%{query.lower()}%"
@@ -259,6 +349,7 @@ class Database:
             game_nick=row["game_nick"],
             real_name=row["real_name"],
             discord_nick=row["discord_nick"],
+            perspective=row["perspective"],
             attempts=row["attempts"],
         )
 
@@ -267,13 +358,14 @@ class Database:
         await db.execute(
             """
             INSERT INTO survey_progress (
-                user_id, step, game_nick, real_name, discord_nick, attempts
-            ) VALUES (?, ?, ?, ?, ?, ?)
+                user_id, step, game_nick, real_name, discord_nick, perspective, attempts
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(user_id) DO UPDATE SET
                 step = excluded.step,
                 game_nick = excluded.game_nick,
                 real_name = excluded.real_name,
                 discord_nick = excluded.discord_nick,
+                perspective = excluded.perspective,
                 attempts = excluded.attempts
             """,
             (
@@ -282,6 +374,7 @@ class Database:
                 progress.game_nick,
                 progress.real_name,
                 progress.discord_nick,
+                progress.perspective,
                 progress.attempts,
             ),
         )
@@ -332,6 +425,26 @@ class Database:
         rows = await cursor.fetchall()
         return {r["user_id"] for r in rows}
 
+    async def get_group_member_join_date(self, user_id: int) -> Optional[str]:
+        db = await self.connect()
+        cursor = await db.execute(
+            "SELECT joined_at FROM group_members WHERE user_id = ?", (user_id,)
+        )
+        row = await cursor.fetchone()
+        return row["joined_at"] if row else None
+
+
+async def get_member_join_date(db: Database, member: Member) -> str:
+    """Return the actual join date, registration date, or legacy placeholder."""
+    if member.is_legacy:
+        return LEGACY_JOIN_DATE
+    joined = await db.get_group_member_join_date(member.user_id)
+    if joined:
+        return joined
+    # Fallback to the registration date for members who passed the survey
+    # but have not yet had their group join tracked.
+    return member.created_at or LEGACY_JOIN_DATE
+
 
 def _row_to_member(row: aiosqlite.Row) -> Member:
     return Member(
@@ -342,5 +455,9 @@ def _row_to_member(row: aiosqlite.Row) -> Member:
         real_name=row["real_name"],
         discord_nick=row["discord_nick"],
         perspective=row["perspective"],
+        is_inactive=bool(row["is_inactive"]),
+        is_legacy=bool(row["is_legacy"]),
+        last_match_at=row["last_match_at"],
+        last_match_checked_at=row["last_match_checked_at"],
         created_at=row["created_at"],
     )

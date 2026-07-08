@@ -1,4 +1,43 @@
 services:
+  pubg-dashboard:
+    build:
+      context: ./dashboard/frontend
+      dockerfile: Dockerfile.dev
+    container_name: pubg-dashboard
+    restart: unless-stopped
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./dashboard/frontend/src:/app/src
+      - ./dashboard/frontend/public:/app/public
+      - ./dashboard/frontend/index.html:/app/index.html
+    env_file:
+      - ./.env
+    environment:
+      - NODE_ENV=development
+      - DEV_API_TARGET=http://pubg-api:8080
+      - VITE_DASHBOARD_API_KEY=${DASHBOARD_API_KEY}
+
+  pubg-api:
+    build:
+      context: .
+      dockerfile: dashboard/backend/Dockerfile.dev
+    container_name: pubg-api
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    env_file:
+      - ./.env
+    volumes:
+      - ./bot:/app/bot
+      - ./dashboard/backend:/app/dashboard/backend
+      - ./data:/app/data
+      - ./alembic:/app/alembic
+      - ./alembic.ini:/app/alembic.ini
+    environment:
+      - DATABASE_PATH=/app/data/bot.db
+    command: ["sh", "-c", "alembic upgrade head && uvicorn dashboard.backend.main:app --host 0.0.0.0 --port 8080 --reload"]
+
   pubg-bot:
     build:
       context: .
@@ -11,3 +50,7 @@ services:
     volumes:
       - ./bot:/app/bot
       - ./data:/app/data
+      - ./alembic:/app/alembic
+      - ./alembic.ini:/app/alembic.ini
+    environment:
+      - DATABASE_PATH=/app/data/bot.db

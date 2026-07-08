@@ -1,14 +1,14 @@
-# Модератор клана BB — Telegram-бот
+# Модератор клана BB — Telegram-бот + SPA Dashboard
 
 Бот для набора в игровой клан: проводит опрос с кнопками, ведёт базу
-участников, синхронизирует данные с Google Sheets и помогает модерировать
-Telegram-**супергруппу** клана.
+участников, синхронизирует статус с Telegram-группой и предоставляет
+админский дашборд на React + Vite.
 
 ## Возможности
 
 ### Опрос для новичков (`/start`)
 1. **Возраст** — набор с 21 года
-2. **Уровень** — от 100+
+2. **Уровень** — от 100+ (сохраняется точное числовое значение)
 3. **Активность** — минимум раз в неделю
 4. **Данные** — ник в игре, имя, Discord
 5. **Режим** — FPP / TPP / Mixed mode
@@ -27,6 +27,7 @@ Telegram-**супергруппу** клана.
 | `/blacklist` | Просмотр чёрного списка |
 | `/unblacklist <id>` | Снять блокировку |
 | `/kick_non_members` | Удалить из группы тех, кто не в базе клана |
+| `/sync_group` | Принудительно синхронизировать фактический состав группы |
 | `/assign_titles` | Проставить игровые ники как теги всем участникам |
 | `/admin_help` | Справка по командам |
 
@@ -45,16 +46,89 @@ Telegram-**супергруппу** клана.
 Команда `/assign_titles` позволяет проставить теги всем уже состоящим
 в группе участникам, чьи ники сохранены в БД.
 
+### SPA Dashboard
+
+Админский дашборд доступен по адресу `http://localhost:8080` (порт задаётся
+`DASHBOARD_PORT`). Страницы:
+
+- `/members` — список активных участников с фильтром, поиском, сортировкой и пагинацией.
+- `/blacklist` — чёрный список.
+- `/inactive` — игроки, у которых последняя катка была 7+ дней назад (168+ часов).
+
 ## Установка
 
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
+
 cp .env.example .env
 # заполните .env
+
+# Примените миграции базы данных
+alembic upgrade head
+
+# Запуск бота (Telegram polling)
 python -m bot.main
+
+# В отдельном терминале — запуск API дашборда
+python -m bot.api.run
 ```
+
+## Сборка фронтенда
+
+```bash
+cd dashboard/frontend
+npm install
+npm run build
+```
+
+После сборки фронтенд раздаётся отдельным nginx-сервисом (Docker) или может быть
+развёрнут статически за reverse proxy.
+
+## Docker
+
+### Production (Docker Compose)
+
+```bash
+cd pubg_moderator_bot
+# frontend собирается внутри образа, node_modules не нужны на хосте
+docker compose up -d
+```
+
+Запускаются сервисы:
+- `pubg-bot` — Telegram бот
+- `pubg-api` — FastAPI backend на порту 8080
+- `pubg-dashboard` — статический frontend (nginx) на порту 80
+- `nginx` — reverse proxy на порту 447
+
+### Development (Docker Compose)
+
+```bash
+cd pubg_moderator_bot
+docker compose -f docker-compose.dev.yml up -d
+```
+
+Запускаются сервисы:
+- `pubg-dashboard` — Vite dev-server на порту 5173
+- `pubg-api` — FastAPI с `--reload` на порту 8080
+- `pubg-bot` — Telegram бот в `network_mode: host` с `watchmedo`
+
+В режиме разработки фронтенда:
+```bash
+cd dashboard/frontend
+cp .env.example .env.local
+# при необходимости добавьте DASHBOARD_API_KEY в VITE_DASHBOARD_API_KEY
+npm run dev
+```
+Vite dev-server проксирует `/api` и `/health` на `http://localhost:8080` (или на `VITE_API_URL`).
+
+## Безопасность дашборда
+
+Если `DASHBOARD_API_KEY` задан, все `POST` endpoints (изменение статусов участников)
+требуют заголовок `X-API-Key`. В production фронтенд передаёт его через
+`VITE_DASHBOARD_API_KEY`. Если ключ не задан, дашборд работает без аутентификации
+(удобно для локальной разработки).
 
 ## Настройка
 
@@ -77,17 +151,7 @@ python -m bot.main
 > бот должен видеть все сообщения в группах. Для опроса в ЛС это не нужно,
 > но необходимо для обработки `chat_member`-апдейтов в группе.
 
-### 2. Google Sheets (опционально)
-1. Создайте проект в [Google Cloud Console](https://console.cloud.google.com/).
-2. Включите Google Sheets API.
-3. Создайте Service Account и скачайте JSON-ключ → `credentials.json`.
-4. Создайте таблицу и дайте service account доступ на редактирование.
-5. Скопируйте ID таблицы из URL в `GOOGLE_SHEET_ID`.
-
-Колонки создаются автоматически: TG Nick, In-game Nick, Discord Nick,
-Real Name, Perspective, User ID, Date.
-
-### 3. Переменные окружения
+### 2. Переменные окружения
 | Переменная | Описание |
 |------------|----------|
 | `BOT_TOKEN` | Токен бота от @BotFather |
@@ -95,30 +159,58 @@ Real Name, Perspective, User ID, Date.
 | `ADMIN_IDS` | ID администраторов через запятую |
 | `TELEGRAM_GROUP_LINK` | Invite-ссылка на супергруппу клана |
 | `DISCORD_LINK` | Invite-ссылка Discord (опционально) |
-| `GOOGLE_SHEETS_CREDENTIALS_FILE` | Путь к JSON-ключу Service Account |
-| `GOOGLE_SHEET_ID` | ID Google-таблицы |
 | `DATABASE_PATH` | Путь к SQLite-файлу (по умолчанию `data/bot.db`) |
-
-> Для обратной совместимости поддерживаются старые имена `CHANNEL_ID` и
-> `TELEGRAM_CHANNEL_LINK`, но рекомендуется использовать новые.
+| `MAX_SURVEY_ATTEMPTS` | Максимальное число попыток опроса (по умолчанию 2) |
+| `DASHBOARD_PORT` | Порт FastAPI дашборда (по умолчанию 8080) |
+| `DASHBOARD_API_KEY` | API-ключ для защиты мутающих endpoints (опционально) |
+| `GROUP_SYNC_INTERVAL_MINUTES` | Интервал фоновой сверки состава группы (по умолчанию 15) |
 
 ## Структура проекта
 
 ```
-bot/
-├── main.py           # точка входа
-├── config.py         # конфигурация
-├── database.py       # SQLite
-├── google_sheets.py  # синхронизация с таблицей
-├── messages.py       # тексты сообщений
-├── keyboards.py      # кнопки
+bot/                         # Telegram бот
+├── main.py                  # точка входа бота
+├── config.py                # конфигурация
+├── database.py              # SQLite через aiosqlite
+├── messages.py              # тексты сообщений
+├── keyboards.py             # кнопки
 └── handlers/
-    ├── survey.py     # опрос
-    └── admin.py      # модерация
+    ├── survey.py            # опрос
+    └── admin.py             # модерация
+
+dashboard/                   # Админский дашборд
+├── backend/
+│   ├── main.py              # FastAPI приложение
+│   ├── run.py               # точка входа FastAPI
+│   ├── models.py            # SQLAlchemy модели для Alembic
+│   ├── schemas.py           # Pydantic схемы
+│   ├── Dockerfile           # production backend
+│   └── Dockerfile.dev       # development backend
+└── frontend/
+    ├── src/                 # React + Vite SPA
+    ├── Dockerfile           # production frontend
+    └── Dockerfile.dev       # development frontend
+
+data/                        # SQLite БД
+alembic/                     # миграции SQLite
 ```
 
 Данные хранятся в `data/bot.db`. При первом запуске после обновления
 старая таблица `channel_members` автоматически мигрирует в `group_members`.
+
+## Миграции
+
+Проект использует Alembic для управления схемой SQLite.
+
+```bash
+# Применить миграции
+alembic upgrade head
+
+# Создать новую миграцию после изменения моделей
+alembic revision --autogenerate -m "описание"
+```
+
+Для SQLite миграции с `ALTER TABLE` выполняются через batch-режим.
 
 ## Автоматический чёрный список
 
@@ -128,3 +220,30 @@ bot/
 - удалён командой `/kick_non_members`.
 
 Снять блокировку: `/unblacklist <telegram_user_id>`.
+
+## Синхронизация с реальной группой
+
+Дашборд использует актуальное состояние Telegram-группы через две стратегии:
+- **Событийная синхронизация** (`chat_member` updates) — бот фиксирует вход/выход в реальном времени.
+- **Фоновая сверка** — бот периодически проходит по участникам клана в БД и сверяет их статус в группе (`GROUP_SYNC_INTERVAL_MINUTES`).
+
+Для ручной сверки можно использовать команду `/sync_group`.
+
+## Проверка активности через op.gg
+
+На странице участников есть кнопка `Проверить op.gg` для каждого игрока:
+- backend делает запрос на `https://op.gg/ru/pubg/user/<game_nick>`;
+- парсит `data-ago-date` из `div.matches-item__reload-time[data-ago-date]`;
+- сохраняет время последней катки в БД.
+
+Игрок автоматически считается неактивным, если `last_match_at <= now - 168h`.
+
+## Статусы участников
+
+- **Активен** — участник в `members`, не в `blacklist`, и последняя катка < 168 часов назад (или ещё не проверена).
+- **Удалён из клана** — участник в `members`, но отсутствует в `group_members`.
+- **Blacklist** — запись в `blacklist`.
+- **Неактивен** — участник в `members`, не в `blacklist`, и последняя катка была 168+ часов назад.
+
+Для участников, добавленных до внедрения бота, используется `is_legacy = 1`
+и дата присоединения отображается как `2001-01-01`.

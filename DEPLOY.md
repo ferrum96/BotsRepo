@@ -46,7 +46,9 @@ cp pubg_moderator_bot/.env.example pubg_moderator_bot/.env
 | fkandu-dashboard | Дашборд (Next.js) | :444 | http://IP:444 |
 | fkandu-api | API дашборда (FastAPI) | :445 | http://IP:445 |
 | fkandu-bot | Telegram бот + файловый сервер | :446 | http://IP:446 |
-| pubg-bot | Telegram бот PUBG | :447 | http://IP:447 |
+| pubg-api | API дашборда PUBG (FastAPI) | :8080 | http://IP:8080 |
+| pubg-bot | Telegram бот PUBG | — | — |
+| pubg-dashboard | Дашборд PUBG (React) | :447 | http://IP:447 |
 
 Все сервисы проксируются через **Nginx**.
 
@@ -54,7 +56,7 @@ cp pubg_moderator_bot/.env.example pubg_moderator_bot/.env
 
 ```bash
 # Статус всех сервисов
-systemctl status kanban fkandu-dashboard fkandu-api fkandu-bot pubg-bot
+systemctl status kanban fkandu-dashboard fkandu-api fkandu-bot pubg-api pubg-bot
 
 # Перезапуск конкретного сервиса
 systemctl restart kanban
@@ -62,6 +64,7 @@ systemctl restart kanban
 # Логи в реальном времени
 journalctl -u kanban -f
 journalctl -u fkandu-bot -f
+journalctl -u pubg-api -f
 
 # Деплой изменений
 ./deploy.sh

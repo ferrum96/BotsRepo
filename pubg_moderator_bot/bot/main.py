@@ -2,9 +2,6 @@
 
 import logging
 import socket
-import os
-import asyncio
-from pathlib import Path
 
 _original_getaddrinfo = socket.getaddrinfo
 
@@ -15,7 +12,6 @@ def _ipv4_getaddrinfo(host, port, family=0, type=0, proto=0, flags=0):
 
 socket.getaddrinfo = _ipv4_getaddrinfo
 
-from aiohttp import web
 from telegram.ext import (
     Application,
     ChatMemberHandler,
@@ -24,7 +20,6 @@ from telegram.ext import (
 
 from bot.config import Config
 from bot.database import Database
-from bot.google_sheets import SheetsSync
 from bot.handlers.admin import (
     cmd_assign_titles,
     cmd_blacklist,
@@ -32,9 +27,11 @@ from bot.handlers.admin import (
     cmd_kick_non_members,
     cmd_members,
     cmd_search,
+    cmd_sync_group,
     cmd_stats,
     cmd_unblacklist,
     on_chat_member_update,
+    sync_group_members_state,
 )
 from bot.handlers.survey import build_survey_handler
 
@@ -44,45 +41,55 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-FILE_SERVER_PORT = int(os.getenv("FILE_SERVER_PORT", "8089"))
-FILES_DIR = Path(os.getenv("FILES_DIR", "data/files"))
-
-
-async def handle_health(request: web.Request) -> web.Response:
-    return web.json_response({"status": "ok"})
-
-
-async def handle_file(request: web.Request) -> web.Response:
-    file_id = request.match_info["file_id"]
-    file_path = FILES_DIR / file_id
-    if not file_path.is_file():
-        return web.Response(status=404, text="Not found")
-    return web.FileResponse(file_path)
-
-
-async def start_file_server() -> None:
-    FILES_DIR.mkdir(parents=True, exist_ok=True)
-    app = web.Application()
-    app.router.add_get("/health", handle_health)
-    app.router.add_get("/files/{file_id}", handle_file)
-    runner = web.AppRunner(app)
-    await runner.setup()
-    site = web.TCPSite(runner, "0.0.0.0", FILE_SERVER_PORT)
-    await site.start()
-    logger.info(f"File server started on port {FILE_SERVER_PORT}")
-
 
 async def post_init(application: Application) -> None:
     db: Database = application.bot_data["db"]
     await db.init()
     logger.info("Database initialized")
-    await start_file_server()
+    config: Config = application.bot_data["config"]
+
+    # Initial one-shot sync to reflect real current group state in dashboard.
+    result = await sync_group_members_state(application.bot, db, config)
+    logger.info(
+        "Initial group sync: total=%s present=%s missing=%s blacklisted=%s errors=%s",
+        result["total"],
+        result["present"],
+        result["missing"],
+        result["blacklisted"],
+        result["errors"],
+    )
+
+    if application.job_queue:
+        interval_sec = max(60, config.group_sync_interval_minutes * 60)
+        application.job_queue.run_repeating(
+            _sync_group_job,
+            interval=interval_sec,
+            first=interval_sec,
+            name="sync_group_members_state",
+        )
+        logger.info(
+            "Scheduled group sync every %s minutes",
+            config.group_sync_interval_minutes,
+        )
+
+
+async def _sync_group_job(context) -> None:
+    db: Database = context.application.bot_data["db"]
+    config: Config = context.application.bot_data["config"]
+    result = await sync_group_members_state(context.bot, db, config)
+    logger.info(
+        "Periodic group sync: total=%s present=%s missing=%s blacklisted=%s errors=%s",
+        result["total"],
+        result["present"],
+        result["missing"],
+        result["blacklisted"],
+        result["errors"],
+    )
 
 
 def main() -> None:
     config = Config.from_env()
     db = Database(config.database_path)
-    sheets = SheetsSync(config)
 
     application = (
         Application.builder()
@@ -93,7 +100,6 @@ def main() -> None:
 
     application.bot_data["config"] = config
     application.bot_data["db"] = db
-    application.bot_data["sheets"] = sheets
 
     application.add_handler(build_survey_handler())
 
@@ -103,6 +109,7 @@ def main() -> None:
     application.add_handler(CommandHandler("blacklist", cmd_blacklist))
     application.add_handler(CommandHandler("unblacklist", cmd_unblacklist))
     application.add_handler(CommandHandler("kick_non_members", cmd_kick_non_members))
+    application.add_handler(CommandHandler("sync_group", cmd_sync_group))
     application.add_handler(CommandHandler("assign_titles", cmd_assign_titles))
     application.add_handler(CommandHandler("admin_help", cmd_help_admin))
 

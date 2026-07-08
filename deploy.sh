@@ -45,10 +45,14 @@ pip3 install -q -r requirements.txt
 cd ..
 
 ## PUBG Bot
-echo "PUBG Bot: pip install..."
+echo "PUBG Bot: pip install + frontend build + migrations..."
 cd pubg_moderator_bot
 pip3 install -q -r requirements.txt
-cd ..
+alembic upgrade head
+cd dashboard/frontend
+npm ci --silent
+npm run build
+cd ../../..
 
 # Перезапуск сервисов
 echo ""
@@ -57,6 +61,7 @@ systemctl restart kanban
 systemctl restart fkandu-dashboard
 systemctl restart fkandu-api
 systemctl restart fkandu-bot
+systemctl restart pubg-api
 systemctl restart pubg-bot
 
 echo ""
