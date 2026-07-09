@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Простой webhook для деплоя при git push."""
+"""Webhook для деплоя после merge pull request в main."""
 
 import hashlib
 import hmac
@@ -18,6 +18,7 @@ class WebhookHandler(BaseHTTPRequestHandler):
     def do_POST(self):
         content_length = int(self.headers.get("Content-Length", 0))
         body = self.rfile.read(content_length)
+        event = self.headers.get("X-GitHub-Event", "")
 
         # Verify signature
         signature = self.headers.get("X-Hub-Signature-256", "")
@@ -38,23 +39,60 @@ class WebhookHandler(BaseHTTPRequestHandler):
             self.wfile.write(b"Invalid JSON")
             return
 
-        # Only deploy on push to main
-        ref = payload.get("ref", "")
-        if ref != "refs/heads/main":
+        # Only deploy when PR is merged to default branch.
+        if event == "ping":
             self.send_response(200)
             self.end_headers()
-            self.wfile.write(json.dumps({"status": "skipped", "ref": ref}).encode())
+            self.wfile.write(b'{"status":"ok","event":"ping"}')
             return
 
-        branch = payload.get("repository", {}).get("default_branch", "main")
-        push_branch = ref.replace("refs/heads/", "")
-        if push_branch != branch:
+        if event != "pull_request":
             self.send_response(200)
             self.end_headers()
-            self.wfile.write(json.dumps({"status": "skipped", "branch": push_branch}).encode())
+            self.wfile.write(
+                json.dumps({"status": "skipped", "reason": "unsupported_event", "event": event}).encode()
+            )
             return
 
-        print(f"[webhook] Push to {branch}, running deploy...")
+        action = payload.get("action")
+        pr = payload.get("pull_request") or {}
+        merged = bool(pr.get("merged"))
+        base_branch = (pr.get("base") or {}).get("ref", "")
+        default_branch = payload.get("repository", {}).get("default_branch", "main")
+
+        if action != "closed" or not merged:
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(
+                json.dumps(
+                    {
+                        "status": "skipped",
+                        "reason": "pr_not_merged",
+                        "action": action,
+                        "merged": merged,
+                    }
+                ).encode()
+            )
+            return
+
+        if base_branch != default_branch:
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(
+                json.dumps(
+                    {
+                        "status": "skipped",
+                        "reason": "base_branch_mismatch",
+                        "base_branch": base_branch,
+                        "default_branch": default_branch,
+                    }
+                ).encode()
+            )
+            return
+
+        pr_number = payload.get("number")
+        pr_title = pr.get("title", "")
+        print(f"[webhook] PR #{pr_number} merged into {base_branch}: {pr_title}. Running deploy...")
         self.send_response(200)
         self.end_headers()
         self.wfile.write(b'{"status": "deploying"}')
@@ -67,7 +105,7 @@ class WebhookHandler(BaseHTTPRequestHandler):
         )
 
     def log_message(self, format, *args):
-        print(f"[webhook] {args[0]}")
+        print(f"[webhook] {format % args}")
 
 
 if __name__ == "__main__":
