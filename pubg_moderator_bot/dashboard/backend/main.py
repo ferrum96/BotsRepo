@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from contextlib import asynccontextmanager
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional, Set
 from urllib.parse import quote
@@ -88,6 +89,61 @@ async def _format_member(db: Database, member: Member, group_ids: Set[int]) -> s
     )
 
 
+async def _try_restore_member_to_group(client: httpx.AsyncClient, user_id: int) -> None:
+    """Try to return restored member to group as automatically as Telegram allows."""
+    approve_resp = await client.post(
+        f"https://api.telegram.org/bot{config.bot_token}/approveChatJoinRequest",
+        json={"chat_id": config.group_id, "user_id": user_id},
+        timeout=15,
+    )
+    approve_data = approve_resp.json()
+    if approve_resp.status_code == 200 and approve_data.get("ok"):
+        logger.info("Approved join request for user %s during restore", user_id)
+        return
+
+    invite_link = config.telegram_group_link
+    if not invite_link:
+        expire_at = int((datetime.now(timezone.utc) + timedelta(hours=1)).timestamp())
+        invite_resp = await client.post(
+            f"https://api.telegram.org/bot{config.bot_token}/createChatInviteLink",
+            json={
+                "chat_id": config.group_id,
+                "name": f"restore-{user_id}",
+                "member_limit": 1,
+                "expire_date": expire_at,
+            },
+            timeout=15,
+        )
+        invite_data = invite_resp.json()
+        if invite_resp.status_code == 200 and invite_data.get("ok"):
+            invite_link = invite_data.get("result", {}).get("invite_link", "")
+
+    if not invite_link:
+        logger.warning("No invite link available for restored user %s", user_id)
+        return
+
+    send_resp = await client.post(
+        f"https://api.telegram.org/bot{config.bot_token}/sendMessage",
+        json={
+            "chat_id": user_id,
+            "text": (
+                "Восстановление выполнено. "
+                "Чтобы вернуться в группу, перейдите по ссылке:\n"
+                f"{invite_link}"
+            ),
+        },
+        timeout=15,
+    )
+    send_data = send_resp.json()
+    if send_resp.status_code != 200 or not send_data.get("ok"):
+        detail = send_data.get("description", send_resp.text)
+        logger.warning(
+            "Failed to send restore invite to user %s: %s",
+            user_id,
+            detail,
+        )
+
+
 @app.get("/health", response_model=schemas.HealthOut)
 async def health():
     return {"status": "ok"}
@@ -101,7 +157,9 @@ async def list_members(
 ):
     members = await db.get_active_members()
     group_ids = await db.get_group_member_ids()
-    return [await _format_member(db, m, group_ids) for m in members]
+    # Members page should list only users who are currently in the Telegram group.
+    members_in_group = [member for member in members if member.user_id in group_ids]
+    return [await _format_member(db, m, group_ids) for m in members_in_group]
 
 
 @app.get("/api/blacklist", response_model=list[schemas.BlacklistOut])
@@ -224,6 +282,54 @@ async def kick_member(
 
     await db.untrack_group_member(user_id)
     await db.add_to_blacklist(user_id, "kicked_from_dashboard")
+
+    return {"ok": True}
+
+
+@app.post("/api/blacklist/{user_id}/unblock")
+async def unblock_blacklist_member(
+    request: Request,
+    user_id: int,
+    db: Database = Depends(get_db),
+    _: None = Security(_verify_api_key),
+):
+    async with httpx.AsyncClient() as client:
+        unban_resp = await client.post(
+            f"https://api.telegram.org/bot{config.bot_token}/unbanChatMember",
+            json={
+                "chat_id": config.group_id,
+                "user_id": user_id,
+                "only_if_banned": True,
+            },
+            timeout=15,
+        )
+        unban_data = unban_resp.json()
+        if unban_resp.status_code != 200 or not unban_data.get("ok"):
+            detail = unban_data.get("description", unban_resp.text)
+            raise HTTPException(
+                status_code=502, detail=f"Telegram API error: {detail}"
+            )
+
+    removed = await db.remove_from_blacklist(user_id)
+    if not removed:
+        raise HTTPException(status_code=404, detail="Blacklist entry not found")
+
+    # Keep tracking aligned with actual Telegram membership state.
+    await db.untrack_group_member(user_id)
+
+    async with httpx.AsyncClient() as client:
+        await _try_restore_member_to_group(client, user_id)
+
+        status_resp = await client.get(
+            f"https://api.telegram.org/bot{config.bot_token}/getChatMember",
+            params={"chat_id": config.group_id, "user_id": user_id},
+            timeout=15,
+        )
+        status_data = status_resp.json()
+        if status_resp.status_code == 200 and status_data.get("ok"):
+            tg_status = status_data.get("result", {}).get("status")
+            if tg_status in {"member", "administrator", "creator", "restricted"}:
+                await db.track_group_member(user_id)
 
     return {"ok": True}
 

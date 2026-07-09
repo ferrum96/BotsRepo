@@ -476,6 +476,5 @@ async def on_chat_member_update(
         await db.untrack_group_member(user.id)
         if config.is_admin(user.id):
             return
-        if await db.is_member(user.id):
-            await db.add_to_blacklist(user.id, "removed_from_group")
-            logger.info("User %s blacklisted after group removal", user.id)
+        await db.add_to_blacklist(user.id, "removed_from_group")
+        logger.info("User %s blacklisted after group removal", user.id)

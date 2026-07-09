@@ -58,3 +58,8 @@ export const kickMember = (userId: number) =>
   fetchJson<{ ok: boolean }>(`/api/members/${userId}/kick`, {
     method: 'POST',
   })
+
+export const unblockBlacklistMember = (userId: number) =>
+  fetchJson<{ ok: boolean }>(`/api/blacklist/${userId}/unblock`, {
+    method: 'POST',
+  })
