@@ -4,12 +4,14 @@ import { PageHeader } from '../components/layout/PageHeader'
 import { ErrorState } from '../components/feedback/ErrorState'
 import { Loader } from '../components/feedback/Loader'
 import { EmptyState } from '../components/feedback/EmptyState'
+import { ConfirmModal } from '../components/ui/ConfirmModal'
 import { MembersTable } from '../features/members/MembersTable'
 import { useMembers, useKickMember } from '../features/members/useMembers'
 import { useDebounce } from '../hooks/useDebounce'
 
 export function MembersPage() {
   const [search, setSearch] = useState('')
+  const [confirmKickUserId, setConfirmKickUserId] = useState<number | null>(null)
   const debouncedSearch = useDebounce(search, 250)
   const { data, isLoading, error, refetch } = useMembers()
   const kickMember = useKickMember()
@@ -17,8 +19,8 @@ export function MembersPage() {
   return (
     <div>
       <PageHeader
-        title="Clan Members"
-        placeholder="Filter Members..."
+        title="Участники группы"
+        placeholder="Ник в игре или имя..."
         value={search}
         onChange={setSearch}
       />
@@ -30,11 +32,26 @@ export function MembersPage() {
         <MembersTable
           members={data}
           search={debouncedSearch}
-          onKick={(userId) => kickMember.mutate(userId)}
+          onKick={(userId) => setConfirmKickUserId(userId)}
           kickingUserId={kickMember.variables}
           isKicking={kickMember.isPending}
         />
       )}
+      <ConfirmModal
+        open={confirmKickUserId !== null}
+        title="Вы уверены?"
+        message="Удалить участника из группы?"
+        confirmLabel="Да"
+        cancelLabel="Нет"
+        isConfirming={kickMember.isPending}
+        onCancel={() => setConfirmKickUserId(null)}
+        onConfirm={() => {
+          if (confirmKickUserId === null) return
+          kickMember.mutate(confirmKickUserId, {
+            onSuccess: () => setConfirmKickUserId(null),
+          })
+        }}
+      />
     </div>
   )
 }

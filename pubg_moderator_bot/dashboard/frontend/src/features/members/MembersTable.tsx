@@ -54,15 +54,34 @@ export function MembersTable({
 
   const columns: Column<Member>[] = [
     {
+      key: 'real_name',
+      header: 'Имя',
+      sortable: true,
+      cell: (row) => (
+        <span className="inline-block max-w-[120px] truncate text-center sm:max-w-none">
+          {row.real_name}
+        </span>
+      ),
+    },
+    {
       key: 'game_nick',
       header: 'Ник в игре',
       sortable: true,
       cell: (row) => (
-        <div className="flex items-center gap-2">
-          <div className={`w-2 h-2 rounded-full ${row.is_removed ? 'bg-red-500' : 'bg-emerald-500'}`} />
-          <span className="font-bold text-electric">{row.game_nick}</span>
+        <div className="flex items-center justify-center gap-1 sm:gap-2">
+          <span className="inline-block max-w-[120px] truncate text-center font-bold text-electric sm:max-w-none">
+            {row.game_nick}
+          </span>
         </div>
       ),
+    },
+    {
+      key: 'discord_nick',
+      header: 'Ник в Discord',
+      sortable: true,
+      headerClassName: 'hidden sm:table-cell',
+      cellClassName: 'hidden sm:table-cell',
+      cell: (row) => row.discord_nick || '—',
     },
     {
       key: 'perspective',
@@ -71,15 +90,11 @@ export function MembersTable({
       cell: (row) => <span className="text-on-surface-variant">{perspectiveLabel(row.perspective)}</span>,
     },
     {
-      key: 'real_name',
-      header: 'Имя',
-      sortable: true,
-      cell: (row) => row.real_name,
-    },
-    {
       key: 'join_date',
       header: 'Дата присоединения',
       sortable: true,
+      headerClassName: 'hidden md:table-cell',
+      cellClassName: 'hidden md:table-cell',
       cell: (row) => <span className="text-on-surface-variant">{formatJoinDate(row.join_date)}</span>,
     },
     {
@@ -88,11 +103,11 @@ export function MembersTable({
       cell: (row) => (
         <Button
           variant="ghost"
-          className="w-auto px-3 py-1 text-red-400 hover:text-red-300 hover:bg-red-950/30"
+          className="w-auto px-2 py-1 text-[11px] sm:text-[12px] text-red-400 hover:text-red-300 hover:bg-red-950/30 whitespace-nowrap"
           onClick={() => onKick(row.user_id)}
           disabled={isKicking}
         >
-          {isKicking && kickingUserId === row.user_id ? 'Удаляю…' : 'Удалить из группы'}
+          {isKicking && kickingUserId === row.user_id ? 'Удаляю…' : 'Удалить'}
         </Button>
       ),
     },
