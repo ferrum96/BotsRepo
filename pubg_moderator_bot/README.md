@@ -120,7 +120,7 @@ docker compose -f docker-compose.dev.yml up --build
 
 ### Production на VPS
 
-Используется **systemd**, не Docker — см. [DEPLOY.md](../DEPLOY.md).
+Используется **systemd**, не Docker — см. [deploy/DEPLOY.md](../deploy/DEPLOY.md).
 
 ## Безопасность дашборда
 

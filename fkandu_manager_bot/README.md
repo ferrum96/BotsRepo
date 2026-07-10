@@ -79,7 +79,7 @@ npm run dev
 | http://IP:445 | fkandu-api |
 | http://IP:446 | fkandu-bot (файлы) |
 
-См. [DEPLOY.md](../DEPLOY.md).
+См. [deploy/DEPLOY.md](../deploy/DEPLOY.md).
 
 ## Переменные окружения
 
