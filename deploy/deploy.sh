@@ -3,10 +3,12 @@ set -e
 
 export PATH="/root/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 
-REPO_DIR="$(cd "$(dirname "$0")" && pwd)"
+DEPLOY_DIR="$(cd "$(dirname "$0")" && pwd)"
+REPO_DIR="$(cd "${DEPLOY_DIR}/.." && pwd)"
 PUBG_DIR="${REPO_DIR}/pubg_moderator_bot"
-PORTS_FILE="${REPO_DIR}/deploy/ports.env"
-SYSTEMD_SRC="${REPO_DIR}/systemd"
+PORTS_FILE="${DEPLOY_DIR}/ports.env"
+SYSTEMD_SRC="${DEPLOY_DIR}/systemd"
+NGINX_CONF="${DEPLOY_DIR}/nginx/nginx-systemd.conf"
 SYSTEMD_DST="/etc/systemd/system"
 
 SERVICES=(
@@ -120,34 +122,34 @@ mark_services_from_file() {
       mark_service_for_restart pubg-api
       mark_service_for_restart pubg-bot
       ;;
-    systemd/kanban.service)
+    deploy/systemd/kanban.service)
       NEEDS_KANBAN=true
       mark_service_for_restart kanban
       ;;
-    systemd/fkandu-dashboard.service)
+    deploy/systemd/fkandu-dashboard.service)
       NEEDS_FKANDU_DASHBOARD=true
       mark_service_for_restart fkandu-dashboard
       ;;
-    systemd/fkandu-api.service)
+    deploy/systemd/fkandu-api.service)
       NEEDS_FKANDU_API=true
       mark_service_for_restart fkandu-api
       ;;
-    systemd/fkandu-bot.service)
+    deploy/systemd/fkandu-bot.service)
       NEEDS_FKANDU_BOT=true
       mark_service_for_restart fkandu-bot
       ;;
-    systemd/pubg-api.service)
+    deploy/systemd/pubg-api.service)
       NEEDS_PUBG_API=true
       mark_service_for_restart pubg-api
       ;;
-    systemd/pubg-bot.service)
+    deploy/systemd/pubg-bot.service)
       NEEDS_PUBG_BOT=true
       mark_service_for_restart pubg-bot
       ;;
-    systemd/deploy-webhook.service|webhook.py|deploy/webhook.env|deploy/webhook.env.example)
+    deploy/systemd/deploy-webhook.service|deploy/webhook.py|deploy/deploy.sh|deploy/webhook.env|deploy/webhook.env.example)
       mark_service_for_restart deploy-webhook
       ;;
-    nginx/*)
+    deploy/nginx/*)
       :
       ;;
     deploy/ports.env)
@@ -180,7 +182,7 @@ detect_changed_services() {
 
 install_systemd_units() {
   if [ ! -d "$SYSTEMD_SRC" ]; then
-    echo "Каталог systemd/ не найден — пропуск установки unit-файлов"
+    echo "Каталог deploy/systemd/ не найден — пропуск установки unit-файлов"
     return
   fi
 
@@ -252,7 +254,7 @@ reload_nginx() {
 }
 
 install_nginx_config() {
-  local src="${REPO_DIR}/nginx/nginx-systemd.conf"
+  local src="${NGINX_CONF}"
   local dest="/etc/nginx/nginx.conf"
 
   if [ ! -f "$src" ]; then

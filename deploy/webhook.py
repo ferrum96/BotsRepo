@@ -11,10 +11,11 @@ import subprocess
 import time
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
-REPO_DIR = os.path.dirname(os.path.abspath(__file__))
+DEPLOY_DIR = os.path.dirname(os.path.abspath(__file__))
+REPO_DIR = os.path.dirname(DEPLOY_DIR)
 SECRET = os.environ.get("WEBHOOK_SECRET", "changeme")
 PORT = int(os.environ.get("PORT_DEPLOY_WEBHOOK", "9000"))
-DEPLOY_SCRIPT = os.path.join(REPO_DIR, "deploy.sh")
+DEPLOY_SCRIPT = os.path.join(DEPLOY_DIR, "deploy.sh")
 DEPLOY_LOG = "/var/log/deploy.log"
 DEPLOY_LOCK = "/var/run/botsrepo-deploy.lock"
 DEPLOY_COOLDOWN_SEC = int(os.environ.get("DEPLOY_COOLDOWN_SEC", "120"))

@@ -78,7 +78,7 @@ npm run db:studio    # drizzle-kit studio
 |-----|----------------|
 | http://IP:448 | 127.0.0.1:3002 |
 
-Сборка и деплой: [DEPLOY.md](../DEPLOY.md).
+Сборка и деплой: [deploy/DEPLOY.md](../deploy/DEPLOY.md).
 
 ```bash
 systemctl status kanban

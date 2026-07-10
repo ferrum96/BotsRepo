@@ -1,13 +1,27 @@
 # Деплой на VPS (systemd)
 
-> **Локальная разработка** — Docker: см. [DEV.md](./DEV.md)  
+> **Локальная разработка** — Docker: см. [DEV.md](../DEV.md)  
 > **Production на сервере** — systemd + nginx на хосте.
+
+## Содержимое `deploy/`
+
+```
+deploy/
+├── deploy.sh              # основной скрипт деплоя
+├── webhook.py             # GitHub webhook → автодеплой
+├── ports.env              # карта портов production/dev
+├── webhook.env.example    # шаблон secret для webhook
+├── nginx/
+│   └── nginx-systemd.conf # nginx для VPS (порты 444–449)
+├── systemd/               # unit-файлы → /etc/systemd/system/
+└── DEPLOY.md              # эта документация
+```
 
 ## Схема
 
 ```
                          ┌──────────────────────────────────────────┐
-  http://IP:444–449      │  nginx (systemd, nginx-systemd.conf)     │
+  http://IP:444–449      │  nginx (deploy/nginx/nginx-systemd.conf) │
                          └────────────────────┬─────────────────────┘
                                               │ 127.0.0.1
          ┌────────────────────────────────────┼────────────────────────────┐
@@ -19,7 +33,7 @@
 
 **Не запускайте на сервере:**
 - `docker-compose.dev.yml` — только для локалки
-- второй nginx (`nginx/nginx.conf` в Docker) — порты 444–449 уже заняты host-nginx
+- `nginx/nginx.conf` (Docker) — порты 444–449 уже заняты host-nginx
 
 ## Карта портов
 
@@ -46,14 +60,14 @@ cp deploy/webhook.env.example deploy/webhook.env
 mkdir -p pubg_moderator_bot/data
 
 # nginx на хосте (единственный reverse proxy)
-cp nginx/nginx-systemd.conf /etc/nginx/nginx.conf
+cp deploy/nginx/nginx-systemd.conf /etc/nginx/nginx.conf
 nginx -t && systemctl enable nginx && systemctl start nginx
 
 # первый деплой (unit-файлы копируются и включаются автоматически)
-./deploy.sh
+./deploy/deploy.sh
 ```
 
-Unit-файлы из `systemd/` **`deploy.sh` копирует в `/etc/systemd/system/`**, делает `daemon-reload`, `enable` и `start` при первом запуске.
+Unit-файлы из `deploy/systemd/` **`deploy/deploy.sh` копирует в `/etc/systemd/system/`**, делает `daemon-reload`, `enable` и `start` при первом запуске.
 
 ### Webhook для автодеплоя
 
@@ -84,7 +98,7 @@ curl -i -X POST http://127.0.0.1:449/ \
 ## Деплой обновлений
 
 ```bash
-./deploy.sh
+./deploy/deploy.sh
 ```
 
 Скрипт выполняет:
@@ -97,7 +111,7 @@ curl -i -X POST http://127.0.0.1:449/ \
 Полный деплой всех сервисов вручную:
 
 ```bash
-DEPLOY_ALL=1 ./deploy.sh
+DEPLOY_ALL=1 ./deploy/deploy.sh
 ```
 
 ### Какие изменения затрагивают какие сервисы
@@ -111,8 +125,8 @@ DEPLOY_ALL=1 ./deploy.sh
 | `pubg_moderator_bot/dashboard/frontend/` | `pubg-api` (+ сборка SPA) |
 | `pubg_moderator_bot/dashboard/backend/`, `bot/` | `pubg-api`, `pubg-bot` |
 | `pubg_moderator_bot/alembic/` | `pubg-api`, `pubg-bot` (+ миграции) |
-| `webhook.py`, `systemd/deploy-webhook.service` | `deploy-webhook` |
-| `nginx/nginx-systemd.conf` | nginx reload |
+| `deploy/webhook.py`, `deploy/systemd/deploy-webhook.service` | `deploy-webhook` |
+| `deploy/nginx/nginx-systemd.conf` | nginx reload |
 
 ## Управление
 
@@ -159,14 +173,14 @@ grep pubg_dashboard /etc/nginx/nginx.conf
 # должно быть: server 127.0.0.1:8080;
 
 # 4. Обновить конфиг и перезапустить
-cp nginx/nginx-systemd.conf /etc/nginx/nginx.conf
+cp deploy/nginx/nginx-systemd.conf /etc/nginx/nginx.conf
 nginx -t && systemctl reload nginx
 systemctl restart pubg-api
 ```
 
 Частые причины:
 - нет или пустой `pubg_moderator_bot/.env` (нужны `BOT_TOKEN`, `GROUP_ID`)
-- не собран фронт (`dashboard/frontend/dist` — делает `deploy.sh`)
+- не собран фронт (`dashboard/frontend/dist` — делает `deploy/deploy.sh`)
 - старый nginx-конфиг с `host.docker.internal` вместо `127.0.0.1`
 
 ## PUBG — переменные окружения

@@ -2,7 +2,7 @@
 
 На **локальной машине** все сервисы поднимаются через **`docker-compose.dev.yml`** в каждом проекте.
 
-На **сервере (VPS)** используется **systemd** — см. [DEPLOY.md](./DEPLOY.md).
+На **сервере (VPS)** используется **systemd** — см. [deploy/DEPLOY.md](./deploy/DEPLOY.md).
 
 ## Быстрый старт
 
@@ -75,9 +75,9 @@ docker compose -f docker-compose.dev.yml up --build
 
 | Файл | Назначение |
 |------|------------|
-| `nginx/nginx-systemd.conf` | Production reverse proxy (порты 444–449), на локалке не нужен |
-| `deploy.sh` | Production-деплой через systemd |
-| `webhook.py` | GitHub webhook для автодеплоя на VPS |
+| `deploy/nginx/nginx-systemd.conf` | Production reverse proxy (порты 444–449), на локалке не нужен |
+| `deploy/deploy.sh` | Production-деплой через systemd |
+| `deploy/webhook.py` | GitHub webhook для автодеплоя на VPS |
 
 ## Порты
 
