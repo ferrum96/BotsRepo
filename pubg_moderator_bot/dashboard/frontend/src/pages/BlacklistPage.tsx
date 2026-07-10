@@ -17,6 +17,16 @@ import { matchesTextQuery } from '../utils/query'
 
 const PAGE_SIZE = 25
 
+function reasonLabel(reason: string): string {
+  if (reason === 'survey_attempts_exhausted' || reason === 'survey_failed') {
+    return 'Не прошел опрос'
+  }
+  if (reason === 'kicked_from_dashboard' || reason === 'removed_from_group') {
+    return 'Забанен админом'
+  }
+  return reason
+}
+
 export function BlacklistPage() {
   const [search, setSearch] = useState('')
   const restoreConfirm = useConfirmAction<number>()
@@ -28,6 +38,7 @@ export function BlacklistPage() {
   const filtered = (data || []).filter((entry) => {
     return matchesTextQuery(
       debouncedSearch,
+      entry.tg_username,
       entry.game_nick,
       entry.real_name,
       entry.discord_nick
@@ -37,8 +48,16 @@ export function BlacklistPage() {
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE))
   const pageSafe = Math.min(page, totalPages)
   const paged = filtered.slice((pageSafe - 1) * PAGE_SIZE, pageSafe * PAGE_SIZE)
-
   const columns: Column<BlacklistEntry>[] = [
+    {
+      key: 'tg_username',
+      header: 'Ник TG',
+      cell: (row) => (
+        <span className="inline-block max-w-[140px] truncate text-center sm:max-w-none">
+          {row.tg_username ? `@${row.tg_username}` : `ID ${row.user_id}`}
+        </span>
+      ),
+    },
     {
       key: 'real_name',
       header: 'Имя',
@@ -57,7 +76,6 @@ export function BlacklistPage() {
         </span>
       ),
     },
-
     {
       key: 'discord_nick',
       header: 'Ник в Discord',
@@ -77,12 +95,14 @@ export function BlacklistPage() {
       ),
     },
     {
-      key: 'status',
-      header: 'Статус',
+      key: 'reason',
+      header: 'Причина блокировки',
       headerClassName: 'hidden sm:table-cell',
       cellClassName: 'hidden sm:table-cell',
-      cell: () => (
-        <Badge className="border-red-900 text-red-500 bg-red-950/30">Blocked</Badge>
+      cell: (row) => (
+        <Badge className="border-red-900 text-red-500 bg-red-950/30">
+          {reasonLabel(row.reason)}
+        </Badge>
       ),
     },
     {
@@ -97,7 +117,7 @@ export function BlacklistPage() {
         >
           {unblockMember.isPending && unblockMember.variables === row.user_id
             ? 'Восст…'
-            : 'Вернуть'}
+            : 'Вернуть доступ'}
         </Button>
       ),
     },
@@ -110,7 +130,7 @@ export function BlacklistPage() {
     <div>
       <PageHeader
         title="Блэклист"
-        placeholder="Ник в игре, Discord или имя..."
+        placeholder="Ник TG, ник в игре, Discord или имя..."
         value={search}
         onChange={setSearch}
       />
@@ -141,7 +161,7 @@ export function BlacklistPage() {
       <ConfirmModal
         open={restoreConfirm.isOpen}
         title="Вы уверены?"
-        message="Восстановить участника и убрать его из blacklist?"
+        message="Восстановить доступ к группе и убрать его из blacklist?"
         confirmLabel="Да"
         cancelLabel="Нет"
         isConfirming={unblockMember.isPending}

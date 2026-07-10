@@ -15,7 +15,10 @@ socket.getaddrinfo = _ipv4_getaddrinfo
 from telegram.ext import (
     Application,
     ChatMemberHandler,
+    ChatJoinRequestHandler,
     CommandHandler,
+    MessageHandler,
+    filters,
 )
 
 from bot.activity_monitor import refresh_group_activity
@@ -31,6 +34,8 @@ from bot.handlers.admin import (
     cmd_sync_group,
     cmd_stats,
     cmd_unblacklist,
+    on_chat_join_request,
+    on_group_membership_message_event,
     on_chat_member_update,
     sync_group_members_state,
 )
@@ -52,11 +57,15 @@ async def post_init(application: Application) -> None:
     # Initial one-shot sync to reflect real current group state in dashboard.
     result = await sync_group_members_state(application.bot, db, config)
     logger.info(
-        "Initial group sync: total=%s present=%s missing=%s blacklisted=%s errors=%s",
+        "Initial group sync: total=%s present=%s missing=%s blacklisted=%s imported_admins=%s import_admin_errors=%s imported=%s import_errors=%s errors=%s",
         result["total"],
         result["present"],
         result["missing"],
         result["blacklisted"],
+        result["imported_admins"],
+        result["import_admin_errors"],
+        result["imported"],
+        result["import_errors"],
         result["errors"],
     )
 
@@ -97,11 +106,15 @@ async def _sync_group_job(context) -> None:
     config: Config = context.application.bot_data["config"]
     result = await sync_group_members_state(context.bot, db, config)
     logger.info(
-        "Periodic group sync: total=%s present=%s missing=%s blacklisted=%s errors=%s",
+        "Periodic group sync: total=%s present=%s missing=%s blacklisted=%s imported_admins=%s import_admin_errors=%s imported=%s import_errors=%s errors=%s",
         result["total"],
         result["present"],
         result["missing"],
         result["blacklisted"],
+        result["imported_admins"],
+        result["import_admin_errors"],
+        result["imported"],
+        result["import_errors"],
         result["errors"],
     )
 
@@ -149,9 +162,24 @@ def main() -> None:
     application.add_handler(
         ChatMemberHandler(on_chat_member_update, ChatMemberHandler.CHAT_MEMBER)
     )
+    application.add_handler(ChatJoinRequestHandler(on_chat_join_request))
+    application.add_handler(
+        MessageHandler(
+            filters.StatusUpdate.NEW_CHAT_MEMBERS
+            | filters.StatusUpdate.LEFT_CHAT_MEMBER,
+            on_group_membership_message_event,
+        )
+    )
 
     logger.info("Bot starting…")
-    application.run_polling(allowed_updates=["message", "callback_query", "chat_member"])
+    application.run_polling(
+        allowed_updates=[
+            "message",
+            "callback_query",
+            "chat_member",
+            "chat_join_request",
+        ]
+    )
 
 
 if __name__ == "__main__":

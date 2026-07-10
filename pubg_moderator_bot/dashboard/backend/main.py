@@ -26,6 +26,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent.parent
 FRONTEND_DIST = BASE_DIR / "dashboard" / "frontend" / "dist"
 
 config = Config.from_env()
+SURVEY_RETRY_BLACKLIST_REASONS = {"survey_attempts_exhausted", "survey_failed"}
 
 api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
 
@@ -125,8 +126,12 @@ async def _try_restore_member_to_group(client: httpx.AsyncClient, user_id: int) 
             "text": (
                 "Восстановление выполнено. "
                 "Чтобы вернуться в группу, перейдите по ссылке:\n"
-                f"{invite_link}"
             ),
+            "reply_markup": {
+                "inline_keyboard": [
+                    [{"text": "👥 Telegram-группа", "url": invite_link}]
+                ]
+            },
         },
         timeout=15,
     )
@@ -138,6 +143,21 @@ async def _try_restore_member_to_group(client: httpx.AsyncClient, user_id: int) 
             user_id,
             detail,
         )
+
+
+async def _fetch_tg_username_for_blacklist(user_id: int) -> str | None:
+    """Best-effort username resolution for blacklist rows without member profile."""
+    async with httpx.AsyncClient() as client:
+        resp = await client.get(
+            f"https://api.telegram.org/bot{config.bot_token}/getChatMember",
+            params={"chat_id": config.group_id, "user_id": user_id},
+            timeout=15,
+        )
+    data = resp.json()
+    if resp.status_code != 200 or not data.get("ok"):
+        return None
+    user = data.get("result", {}).get("user", {})
+    return user.get("username")
 
 
 @app.get("/health", response_model=schemas.HealthOut)
@@ -166,14 +186,22 @@ async def list_blacklist(
 ):
     rows = await db.get_blacklist()
     result: list[schemas.BlacklistOut] = []
-    for uid, _reason, created_at in rows:
+    for uid, reason, created_at in rows:
         member = await db.get_member(uid)
+        tg_username = member.tg_username if member else None
+        if not tg_username and reason in SURVEY_RETRY_BLACKLIST_REASONS:
+            try:
+                tg_username = await _fetch_tg_username_for_blacklist(uid)
+            except Exception:
+                logger.exception("Failed to resolve tg username for blacklist user %s", uid)
         result.append(
             schemas.BlacklistOut(
                 user_id=uid,
+                tg_username=tg_username,
                 game_nick=member.game_nick if member else None,
                 real_name=member.real_name if member else None,
                 discord_nick=member.discord_nick if member else None,
+                reason=reason,
                 created_at=created_at,
             )
         )
@@ -298,6 +326,12 @@ async def unblock_blacklist_member(
     db: Database = Depends(get_db),
     _: None = Security(_verify_api_key),
 ):
+    blacklist_rows = await db.get_blacklist()
+    entry = next((row for row in blacklist_rows if row[0] == user_id), None)
+    if not entry:
+        raise HTTPException(status_code=404, detail="Blacklist entry not found")
+    blacklist_reason = entry[1]
+
     async with httpx.AsyncClient() as client:
         unban_resp = await client.post(
             f"https://api.telegram.org/bot{config.bot_token}/unbanChatMember",
@@ -321,6 +355,33 @@ async def unblock_blacklist_member(
 
     # Keep tracking aligned with actual Telegram membership state.
     await db.untrack_group_member(user_id)
+
+    if blacklist_reason in SURVEY_RETRY_BLACKLIST_REASONS:
+        async with httpx.AsyncClient() as client:
+            notify_resp = await client.post(
+                f"https://api.telegram.org/bot{config.bot_token}/sendMessage",
+                json={
+                    "chat_id": user_id,
+                    "text": (
+                        "Вы разблокированы и можете повторно пройти опрос.\n"
+                        "Нажмите /start и заполните анкету заново."
+                    ),
+                },
+                timeout=15,
+            )
+            notify_data = notify_resp.json()
+            if notify_resp.status_code != 200 or not notify_data.get("ok"):
+                logger.warning(
+                    "Failed to send survey retry notice to user %s: %s",
+                    user_id,
+                    notify_data.get("description", notify_resp.text),
+                )
+        logger.info(
+            "User %s restored from blacklist reason=%s, skipping auto group return",
+            user_id,
+            blacklist_reason,
+        )
+        return {"ok": True, "requires_survey": True}
 
     async with httpx.AsyncClient() as client:
         await _try_restore_member_to_group(client, user_id)

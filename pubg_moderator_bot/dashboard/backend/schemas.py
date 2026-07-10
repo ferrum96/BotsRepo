@@ -22,9 +22,11 @@ class MemberOut(BaseModel):
 
 class BlacklistOut(BaseModel):
     user_id: int
+    tg_username: Optional[str] = None
     game_nick: Optional[str] = None
     real_name: Optional[str] = None
     discord_nick: Optional[str] = None
+    reason: str
     created_at: str
 
     class Config:

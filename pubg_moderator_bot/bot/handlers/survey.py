@@ -21,7 +21,9 @@ from bot.keyboards import (
     activity_keyboard,
     age_keyboard,
     join_clan_keyboard,
+    level_keyboard,
     perspective_keyboard,
+    text_step_back_keyboard,
 )
 
 if TYPE_CHECKING:
@@ -32,12 +34,13 @@ logger = logging.getLogger(__name__)
 # Conversation states
 (
     AGE,
+    LEVEL,
     ACTIVITY,
+    PERSPECTIVE,
     GAME_NICK,
     REAL_NAME,
     DISCORD,
-    PERSPECTIVE,
-) = range(6)
+) = range(7)
 
 
 def _get_db(context: ContextTypes.DEFAULT_TYPE) -> Database:
@@ -185,6 +188,23 @@ async def age_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
         return await _handle_rejection(update, context, msg.REJECT_AGE)
 
     await query.answer()
+    await query.edit_message_text(msg.ASK_LEVEL, reply_markup=level_keyboard())
+
+    await _next_progress(context, query.from_user.id, "level")
+    return LEVEL
+
+
+async def level_callback(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> int:
+    query = update.callback_query
+    if not query or not query.data or not query.from_user:
+        return ConversationHandler.END
+
+    if query.data == "level:under":
+        return await _handle_rejection(update, context, msg.REJECT_LEVEL)
+
+    await query.answer()
     await query.edit_message_text(msg.ASK_ACTIVITY, reply_markup=activity_keyboard())
 
     await _next_progress(context, query.from_user.id, "activity")
@@ -202,11 +222,62 @@ async def activity_callback(
         return await _handle_rejection(update, context, msg.REJECT_ACTIVITY)
 
     await query.answer()
-    await query.edit_message_text(msg.ASK_GAME_NICK)
+    await query.edit_message_text(
+        msg.ASK_PERSPECTIVE, reply_markup=perspective_keyboard()
+    )
 
     user_id = query.from_user.id
-    await _next_progress(context, user_id, "game_nick")
-    return GAME_NICK
+    await _next_progress(context, user_id, "perspective")
+    return PERSPECTIVE
+
+
+async def back_callback(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> int:
+    query = update.callback_query
+    if not query or not query.data or not query.from_user:
+        return ConversationHandler.END
+
+    await query.answer()
+    user_id = query.from_user.id
+    target = query.data.removeprefix("back:")
+
+    if target == "age":
+        await _next_progress(context, user_id, "age")
+        await query.edit_message_text(msg.ASK_AGE, reply_markup=age_keyboard())
+        return AGE
+    if target == "level":
+        await _next_progress(context, user_id, "level")
+        await query.edit_message_text(msg.ASK_LEVEL, reply_markup=level_keyboard())
+        return LEVEL
+    if target == "activity":
+        await _next_progress(context, user_id, "activity")
+        await query.edit_message_text(
+            msg.ASK_ACTIVITY, reply_markup=activity_keyboard()
+        )
+        return ACTIVITY
+    if target == "perspective":
+        await _next_progress(context, user_id, "perspective")
+        await query.edit_message_text(
+            msg.ASK_PERSPECTIVE, reply_markup=perspective_keyboard()
+        )
+        return PERSPECTIVE
+    if target == "game_nick":
+        await _next_progress(context, user_id, "game_nick")
+        await query.edit_message_text(
+            msg.ASK_GAME_NICK,
+            reply_markup=text_step_back_keyboard("back:perspective"),
+        )
+        return GAME_NICK
+    if target == "real_name":
+        await _next_progress(context, user_id, "real_name")
+        await query.edit_message_text(
+            msg.ASK_REAL_NAME,
+            reply_markup=text_step_back_keyboard("back:game_nick"),
+        )
+        return REAL_NAME
+
+    return ConversationHandler.END
 
 
 async def game_nick_input(
@@ -222,7 +293,10 @@ async def game_nick_input(
 
     user_id = update.effective_user.id
     await _next_progress(context, user_id, "real_name", game_nick=text)
-    await update.message.reply_text(msg.ASK_REAL_NAME)
+    await update.message.reply_text(
+        msg.ASK_REAL_NAME,
+        reply_markup=text_step_back_keyboard("back:game_nick"),
+    )
     return REAL_NAME
 
 
@@ -246,7 +320,10 @@ async def real_name_input(
         game_nick=prev.game_nick if prev else None,
         real_name=text,
     )
-    await update.message.reply_text(msg.ASK_DISCORD)
+    await update.message.reply_text(
+        msg.ASK_DISCORD,
+        reply_markup=text_step_back_keyboard("back:real_name"),
+    )
     return DISCORD
 
 
@@ -261,19 +338,37 @@ async def discord_input(
 
     user_id = update.effective_user.id
     prev = await _get_db(context).get_progress(user_id)
+    config = _get_config(context)
+
+    if not prev or not prev.perspective:
+        # Safety fallback for users with legacy in-progress states.
+        await _next_progress(
+            context,
+            user_id,
+            "perspective",
+            game_nick=prev.game_nick if prev else None,
+            real_name=prev.real_name if prev else None,
+            discord_nick=discord_nick,
+        )
+        await update.message.reply_text(
+            msg.ASK_PERSPECTIVE, reply_markup=perspective_keyboard()
+        )
+        return PERSPECTIVE
+
     await _next_progress(
         context,
         user_id,
-        "perspective",
+        "completed",
         game_nick=prev.game_nick if prev else None,
         real_name=prev.real_name if prev else None,
         discord_nick=discord_nick,
+        perspective=prev.perspective,
     )
-
     await update.message.reply_text(
-        msg.ASK_PERSPECTIVE, reply_markup=perspective_keyboard()
+        msg.SURVEY_COMPLETE,
+        reply_markup=join_clan_keyboard(config),
     )
-    return PERSPECTIVE
+    return ConversationHandler.END
 
 
 async def perspective_callback(
@@ -294,32 +389,20 @@ async def perspective_callback(
     if not perspective:
         return ConversationHandler.END
 
-    db = _get_db(context)
-    config = _get_config(context)
     user = query.from_user
-
-    progress = await db.get_progress(user.id)
-    if not progress or not progress.game_nick or not progress.real_name:
-        await query.edit_message_text(
-            "Что-то пошло не так. Нажми /start, чтобы начать заново."
-        )
-        return ConversationHandler.END
 
     await _next_progress(
         context,
         user.id,
-        "completed",
-        game_nick=progress.game_nick,
-        real_name=progress.real_name,
-        discord_nick=progress.discord_nick,
+        "game_nick",
         perspective=perspective,
     )
 
     await query.edit_message_text(
-        msg.SURVEY_COMPLETE,
-        reply_markup=join_clan_keyboard(config),
+        msg.ASK_GAME_NICK,
+        reply_markup=text_step_back_keyboard("back:perspective"),
     )
-    return ConversationHandler.END
+    return GAME_NICK
 
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -333,22 +416,31 @@ def build_survey_handler() -> ConversationHandler:
         entry_points=[CommandHandler("start", start)],
         states={
             AGE: [CallbackQueryHandler(age_callback, pattern=r"^age:")],
+            LEVEL: [
+                CallbackQueryHandler(level_callback, pattern=r"^level:"),
+                CallbackQueryHandler(back_callback, pattern=r"^back:"),
+            ],
             ACTIVITY: [
-                CallbackQueryHandler(activity_callback, pattern=r"^activity:")
-            ],
-            GAME_NICK: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, game_nick_input)
-            ],
-            REAL_NAME: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, real_name_input)
-            ],
-            DISCORD: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, discord_input)
+                CallbackQueryHandler(activity_callback, pattern=r"^activity:"),
+                CallbackQueryHandler(back_callback, pattern=r"^back:"),
             ],
             PERSPECTIVE: [
                 CallbackQueryHandler(
                     perspective_callback, pattern=r"^perspective:"
-                )
+                ),
+                CallbackQueryHandler(back_callback, pattern=r"^back:"),
+            ],
+            GAME_NICK: [
+                CallbackQueryHandler(back_callback, pattern=r"^back:"),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, game_nick_input)
+            ],
+            REAL_NAME: [
+                CallbackQueryHandler(back_callback, pattern=r"^back:"),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, real_name_input)
+            ],
+            DISCORD: [
+                CallbackQueryHandler(back_callback, pattern=r"^back:"),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, discord_input)
             ],
         },
         fallbacks=[CommandHandler("cancel", cancel)],
