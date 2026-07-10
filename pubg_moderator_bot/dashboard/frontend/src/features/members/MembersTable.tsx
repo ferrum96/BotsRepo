@@ -86,7 +86,7 @@ export function MembersTable({
           onClick={() => onKick(row.user_id)}
           disabled={isKicking}
         >
-          {isKicking && kickingUserId === row.user_id ? 'Удаляю…' : 'Удалить'}
+          {isKicking && kickingUserId === row.user_id ? 'Удаляю…' : 'Удалить из группы'}
         </Button>
       ),
     },

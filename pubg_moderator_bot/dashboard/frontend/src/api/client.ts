@@ -31,9 +31,11 @@ export interface Member {
 
 export interface BlacklistEntry {
   user_id: number
+  tg_username: string | null
   game_nick: string | null
   real_name: string | null
   discord_nick: string | null
+  reason: string
   created_at: string
 }
 

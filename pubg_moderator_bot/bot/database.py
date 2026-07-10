@@ -368,6 +368,26 @@ class Database:
             attempts=row["attempts"],
         )
 
+    async def get_progress_by_step(self, step: str) -> list[SurveyProgress]:
+        db = await self.connect()
+        cursor = await db.execute(
+            "SELECT * FROM survey_progress WHERE step = ?",
+            (step,),
+        )
+        rows = await cursor.fetchall()
+        return [
+            SurveyProgress(
+                user_id=row["user_id"],
+                step=row["step"],
+                game_nick=row["game_nick"],
+                real_name=row["real_name"],
+                discord_nick=row["discord_nick"],
+                perspective=row["perspective"],
+                attempts=row["attempts"],
+            )
+            for row in rows
+        ]
+
     async def set_progress(self, progress: SurveyProgress) -> None:
         db = await self.connect()
         await db.execute(

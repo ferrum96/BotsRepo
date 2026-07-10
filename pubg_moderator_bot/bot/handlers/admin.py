@@ -19,6 +19,24 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+_PRESENT_STATUSES = {
+    ChatMemberStatus.MEMBER,
+    ChatMemberStatus.RESTRICTED,
+    ChatMemberStatus.ADMINISTRATOR,
+    ChatMemberStatus.OWNER,
+}
+_REMOVED_STATUSES = {
+    ChatMemberStatus.LEFT,
+    ChatMemberStatus.BANNED,
+}
+
+
+def _normalize_game_nick(value: str) -> str:
+    nick = (value or "").strip()
+    while len(nick) >= 2 and nick.startswith("{") and nick.endswith("}"):
+        nick = nick[1:-1].strip()
+    return nick
+
 
 def _get_db(context: ContextTypes.DEFAULT_TYPE) -> Database:
     return context.application.bot_data["db"]
@@ -33,7 +51,84 @@ async def sync_group_members_state(
     db: Database,
     config: "Config",
 ) -> dict[str, int]:
-    """Sync actual Telegram group presence for known clan members."""
+    """Sync Telegram group state and backfill members from completed surveys."""
+    imported = 0
+    imported_errors = 0
+    imported_admins = 0
+    imported_admin_errors = 0
+    known_member_ids = await db.get_member_user_ids()
+
+    # Telegram Bot API cannot enumerate all regular members, but administrators
+    # are available and can be imported on restart.
+    try:
+        administrators = await bot.get_chat_administrators(config.group_id)
+        for admin in administrators:
+            if admin.user.is_bot or admin.status == ChatMemberStatus.OWNER:
+                continue
+
+            if admin.user.id in known_member_ids:
+                await db.track_group_member(admin.user.id)
+                continue
+
+            guessed_nick = (
+                getattr(admin, "custom_title", None)
+                or admin.user.username
+                or admin.user.first_name
+                or f"user_{admin.user.id}"
+            )
+            guessed_nick = _normalize_game_nick(guessed_nick)
+            await db.save_member(
+                user_id=admin.user.id,
+                tg_username=admin.user.username,
+                tg_first_name=admin.user.first_name,
+                game_nick=guessed_nick,
+                real_name=admin.user.full_name or guessed_nick,
+                discord_nick=None,
+                perspective="Mixed",
+            )
+            await db.track_group_member(admin.user.id)
+            known_member_ids.add(admin.user.id)
+            imported_admins += 1
+    except (BadRequest, Forbidden, TelegramError):
+        logger.exception(
+            "Failed to import current administrators for chat %s",
+            config.group_id,
+        )
+        imported_admin_errors += 1
+
+    completed_progress = await db.get_progress_by_step("completed")
+    for progress in completed_progress:
+        if progress.user_id in known_member_ids:
+            continue
+        if not progress.game_nick or not progress.real_name:
+            continue
+        try:
+            chat_member = await bot.get_chat_member(config.group_id, progress.user_id)
+        except (BadRequest, Forbidden, TelegramError):
+            logger.exception(
+                "Failed to fetch chat member %s for completed survey import",
+                progress.user_id,
+            )
+            imported_errors += 1
+            continue
+
+        if chat_member.status in _REMOVED_STATUSES:
+            continue
+
+        user = chat_member.user
+        await db.save_member(
+            user_id=user.id,
+            tg_username=user.username,
+            tg_first_name=user.first_name,
+            game_nick=progress.game_nick,
+            real_name=progress.real_name,
+            discord_nick=progress.discord_nick,
+            perspective=progress.perspective or "Mixed",
+        )
+        await db.track_group_member(user.id)
+        known_member_ids.add(user.id)
+        imported += 1
+
     members = await db.get_all_members()
     admin_ids = set(config.admin_ids)
     present = 0
@@ -49,10 +144,14 @@ async def sync_group_members_state(
             errors += 1
             continue
 
-        if chat_member.status in (ChatMemberStatus.LEFT, ChatMemberStatus.BANNED):
+        if chat_member.status in _REMOVED_STATUSES:
             await db.untrack_group_member(member.user_id)
             missing += 1
-            if member.user_id not in admin_ids:
+            # Voluntary leave should not trigger blacklist entry.
+            if (
+                chat_member.status == ChatMemberStatus.BANNED
+                and member.user_id not in admin_ids
+            ):
                 await db.add_to_blacklist(member.user_id, "removed_from_group")
                 blacklisted += 1
             continue
@@ -66,6 +165,10 @@ async def sync_group_members_state(
         "missing": missing,
         "blacklisted": blacklisted,
         "errors": errors,
+        "imported": imported,
+        "import_errors": imported_errors,
+        "imported_admins": imported_admins,
+        "import_admin_errors": imported_admin_errors,
     }
 
 
@@ -88,6 +191,107 @@ def _format_member_line(member) -> str:
         f"• <b>{member.game_nick}</b> — {member.real_name}\n"
         f"  TG: @{tg} | Discord: {discord} | {member.perspective}"
     )
+
+
+async def _has_completed_survey(db: Database, user_id: int) -> bool:
+    progress = await db.get_progress(user_id)
+    return progress is not None and progress.step == "completed"
+
+
+async def _may_enter_group(db: Database, config: "Config", user_id: int) -> bool:
+    """Allow entry only for vetted users (completed survey or existing member)."""
+    if await db.is_blacklisted(user_id):
+        return False
+    if config.is_admin(user_id):
+        return True
+    if await db.is_member(user_id):
+        return True
+    return await _has_completed_survey(db, user_id)
+
+
+async def _refresh_member_tg_profile(db: Database, user) -> None:
+    """Update Telegram profile fields for an existing clan member."""
+    existing = await db.get_member(user.id)
+    if not existing:
+        return
+    normalized_nick = _normalize_game_nick(existing.game_nick)
+    await db.save_member(
+        user_id=user.id,
+        tg_username=user.username,
+        tg_first_name=user.first_name,
+        game_nick=normalized_nick or existing.game_nick,
+        real_name=existing.real_name,
+        discord_nick=existing.discord_nick,
+        perspective=existing.perspective,
+    )
+
+
+async def _promote_from_completed_survey(db: Database, user) -> bool:
+    """Create a clan member record from a completed survey."""
+    progress = await db.get_progress(user.id)
+    if not progress or progress.step != "completed":
+        return False
+    if not progress.game_nick or not progress.real_name:
+        return False
+    await db.save_member(
+        user_id=user.id,
+        tg_username=user.username,
+        tg_first_name=user.first_name,
+        game_nick=progress.game_nick,
+        real_name=progress.real_name,
+        discord_nick=progress.discord_nick,
+        perspective=progress.perspective or "Mixed",
+    )
+    await db.clear_progress(user.id)
+    return True
+
+
+async def _kick_unvetted_member(
+    bot: Bot,
+    config: "Config",
+    db: Database,
+    user_id: int,
+) -> None:
+    """Remove a user who joined without passing the survey gate."""
+    try:
+        await remove_from_group_header(
+            bot_token=config.bot_token,
+            chat_id=config.group_id,
+            user_id=user_id,
+            bot=bot,
+        )
+        await bot.ban_chat_member(config.group_id, user_id)
+        await bot.unban_chat_member(config.group_id, user_id)
+    except (BadRequest, Forbidden, TelegramError):
+        logger.exception("Failed to kick unvetted user %s", user_id)
+    await db.untrack_group_member(user_id)
+
+
+async def _handle_vetted_group_join(
+    bot: Bot,
+    config: "Config",
+    db: Database,
+    user,
+) -> None:
+    """Track join and sync member data for users allowed in the group."""
+    await db.track_group_member(user.id)
+
+    if await db.is_member(user.id):
+        await _refresh_member_tg_profile(db, user)
+    else:
+        promoted = await _promote_from_completed_survey(db, user)
+        if not promoted:
+            await _kick_unvetted_member(bot, config, db, user.id)
+            return
+
+    member = await db.get_member(user.id)
+    if member and member.game_nick and not config.is_admin(user.id):
+        await assign_game_nick_title(
+            bot,
+            config.group_id,
+            user.id,
+            member.game_nick,
+        )
 
 
 async def cmd_members(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -408,7 +612,11 @@ async def cmd_sync_group(
         f"Сейчас в группе: {result['present']}\n"
         f"Отсутствуют в группе: {result['missing']}\n"
         f"Добавлено в blacklist: {result['blacklisted']}\n"
-        f"Ошибок: {result['errors']}"
+        f"Импортировано текущих админов группы: {result['imported_admins']}\n"
+        f"Ошибок импорта админов: {result['import_admin_errors']}\n"
+        f"Импортировано из завершённых анкет: {result['imported']}\n"
+        f"Ошибок импорта: {result['import_errors']}\n"
+        f"Ошибок синка: {result['errors']}"
     )
 
 
@@ -446,35 +654,160 @@ async def on_chat_member_update(
 
     joined_statuses = (ChatMemberStatus.MEMBER, ChatMemberStatus.RESTRICTED)
     if new_status in joined_statuses and old_status not in joined_statuses:
-        await db.track_group_member(user.id)
-
-        if not await db.is_member(user.id):
-            progress = await db.get_progress(user.id)
-            if progress and progress.step == "completed":
-                await db.save_member(
-                    user_id=user.id,
-                    tg_username=user.username,
-                    tg_first_name=user.first_name,
-                    game_nick=progress.game_nick or "",
-                    real_name=progress.real_name or "",
-                    discord_nick=progress.discord_nick,
-                    perspective=progress.perspective or "Mixed",
-                )
-                await db.clear_progress(user.id)
-
-        member = await db.get_member(user.id)
-        if member and member.game_nick:
-            await assign_game_nick_title(
-                context.bot,
-                config.group_id,
+        if not await _may_enter_group(db, config, user.id):
+            logger.info(
+                "Rejecting unvetted join for user %s (no completed survey/membership)",
                 user.id,
-                member.game_nick,
             )
+            await _kick_unvetted_member(context.bot, config, db, user.id)
+            return
+
+        await _handle_vetted_group_join(context.bot, config, db, user)
+        sync_result = await sync_group_members_state(context.bot, db, config)
+        logger.info(
+            "Event sync after join user=%s: total=%s present=%s missing=%s blacklisted=%s errors=%s",
+            user.id,
+            sync_result["total"],
+            sync_result["present"],
+            sync_result["missing"],
+            sync_result["blacklisted"],
+            sync_result["errors"],
+        )
         return
 
     if was_member and new_status in removed_statuses:
         await db.untrack_group_member(user.id)
         if config.is_admin(user.id):
             return
-        await db.add_to_blacklist(user.id, "removed_from_group")
-        logger.info("User %s blacklisted after group removal", user.id)
+        if new_status == ChatMemberStatus.BANNED:
+            await db.add_to_blacklist(user.id, "removed_from_group")
+            logger.info("User %s blacklisted after group ban/kick", user.id)
+        else:
+            logger.info("User %s left group voluntarily, blacklist skipped", user.id)
+        sync_result = await sync_group_members_state(context.bot, db, config)
+        logger.info(
+            "Event sync after leave user=%s: total=%s present=%s missing=%s blacklisted=%s errors=%s",
+            user.id,
+            sync_result["total"],
+            sync_result["present"],
+            sync_result["missing"],
+            sync_result["blacklisted"],
+            sync_result["errors"],
+        )
+
+
+async def on_group_membership_message_event(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    """Fallback sync when Telegram sends service message join/left events."""
+    if not update.message or not update.effective_chat:
+        return
+
+    config = _get_config(context)
+    if update.effective_chat.id != config.group_id:
+        return
+
+    db = _get_db(context)
+    changed = False
+
+    if update.message.left_chat_member and not update.message.left_chat_member.is_bot:
+        await db.untrack_group_member(update.message.left_chat_member.id)
+        changed = True
+
+    if update.message.new_chat_members:
+        for user in update.message.new_chat_members:
+            if user.is_bot:
+                continue
+            if not await _may_enter_group(db, config, user.id):
+                logger.info(
+                    "Rejecting unvetted fallback join for user %s",
+                    user.id,
+                )
+                await _kick_unvetted_member(context.bot, config, db, user.id)
+                changed = True
+                continue
+            await _handle_vetted_group_join(context.bot, config, db, user)
+            changed = True
+
+    if not changed:
+        return
+
+    sync_result = await sync_group_members_state(context.bot, db, config)
+    logger.info(
+        "Fallback message sync: total=%s present=%s missing=%s blacklisted=%s errors=%s",
+        sync_result["total"],
+        sync_result["present"],
+        sync_result["missing"],
+        sync_result["blacklisted"],
+        sync_result["errors"],
+    )
+
+
+async def on_chat_join_request(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    """Auto-approve join requests only for vetted users."""
+    req = update.chat_join_request
+    if not req:
+        return
+
+    config = _get_config(context)
+    if req.chat.id != config.group_id:
+        return
+
+    user = req.from_user
+    if user.is_bot:
+        return
+
+    db = _get_db(context)
+    if await db.is_blacklisted(user.id):
+        logger.info("Join request from blacklisted user %s ignored", user.id)
+        try:
+            await context.bot.decline_chat_join_request(
+                chat_id=config.group_id,
+                user_id=user.id,
+            )
+        except (BadRequest, Forbidden, TelegramError):
+            logger.exception(
+                "Failed to decline join request for blacklisted user %s",
+                user.id,
+            )
+        return
+
+    if not await _may_enter_group(db, config, user.id):
+        logger.info(
+            "Join request from unvetted user %s declined (survey not completed)",
+            user.id,
+        )
+        try:
+            await context.bot.decline_chat_join_request(
+                chat_id=config.group_id,
+                user_id=user.id,
+            )
+        except (BadRequest, Forbidden, TelegramError):
+            logger.exception(
+                "Failed to decline join request for unvetted user %s",
+                user.id,
+            )
+        return
+
+    try:
+        await context.bot.approve_chat_join_request(
+            chat_id=config.group_id,
+            user_id=user.id,
+        )
+    except (BadRequest, Forbidden, TelegramError):
+        logger.exception("Failed to approve join request for user %s", user.id)
+        return
+
+    await _handle_vetted_group_join(context.bot, config, db, user)
+    sync_result = await sync_group_members_state(context.bot, db, config)
+    logger.info(
+        "Approved join request user=%s: total=%s present=%s missing=%s blacklisted=%s errors=%s",
+        user.id,
+        sync_result["total"],
+        sync_result["present"],
+        sync_result["missing"],
+        sync_result["blacklisted"],
+        sync_result["errors"],
+    )

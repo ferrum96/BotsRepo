@@ -25,7 +25,7 @@ class Config:
     max_survey_attempts: int = 2
     dashboard_port: int = 8080
     dashboard_api_key: str = ""
-    group_sync_interval_minutes: int = 15
+    group_sync_interval_minutes: int = 10
 
     @classmethod
     def from_env(cls) -> "Config":
@@ -47,7 +47,7 @@ class Config:
             dashboard_port=int(os.getenv("DASHBOARD_PORT", "8080")),
             dashboard_api_key=os.getenv("DASHBOARD_API_KEY", ""),
             group_sync_interval_minutes=int(
-                os.getenv("GROUP_SYNC_INTERVAL_MINUTES", "15")
+                os.getenv("GROUP_SYNC_INTERVAL_MINUTES", "10")
             ),
         )
 

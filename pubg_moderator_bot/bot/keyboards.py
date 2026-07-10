@@ -1,8 +1,21 @@
 """Inline and reply keyboards."""
 
+from typing import Optional
+
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
 from bot.config import Config
+
+
+def _append_back_row(
+    rows: list[list[InlineKeyboardButton]],
+    back_callback_data: Optional[str],
+) -> list[list[InlineKeyboardButton]]:
+    if back_callback_data:
+        rows.append(
+            [InlineKeyboardButton("⬅️ Назад", callback_data=back_callback_data)]
+        )
+    return rows
 
 
 def age_keyboard() -> InlineKeyboardMarkup:
@@ -55,6 +68,12 @@ def perspective_keyboard() -> InlineKeyboardMarkup:
                 )
             ],
         ]
+    )
+
+
+def text_step_back_keyboard(back_callback_data: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [[InlineKeyboardButton("⬅️ Назад", callback_data=back_callback_data)]]
     )
 
 

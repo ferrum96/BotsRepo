@@ -11,6 +11,7 @@ export function useMembers() {
   return useQuery({
     queryKey: KEY,
     queryFn: fetchMembers,
+    refetchInterval: 10 * 60 * 1000,
   })
 }
 
