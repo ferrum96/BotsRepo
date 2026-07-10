@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { Sidebar } from './components/Sidebar'
 import { BoardView } from './components/BoardView'
 import { api } from './lib/api'
+import { reorderTasksInBoard } from './lib/kanban-utils'
 import { Board, BoardWithDetails } from './lib/types'
 
 const STORAGE_KEY = 'kanban-selected-board'
@@ -23,21 +24,23 @@ export default function App() {
     }
   }, [])
 
-  const fetchBoard = useCallback(async () => {
+  const fetchBoard = useCallback(async (options?: { silent?: boolean }) => {
     if (!selectedBoardId) {
       setBoard(null)
       setLoading(false)
       return
     }
 
+    const silent = options?.silent ?? false
+
     try {
-      setLoading(true)
+      if (!silent) setLoading(true)
       const data = await api.boards.get(selectedBoardId)
       setBoard(data)
     } catch (err) {
       console.error('Failed to fetch board:', err)
     } finally {
-      setLoading(false)
+      if (!silent) setLoading(false)
     }
   }, [selectedBoardId])
 
@@ -55,8 +58,21 @@ export default function App() {
   }
 
   const handleMoveTask = async (taskId: string, columnId: string, position: number) => {
-    await api.tasks.move(taskId, { columnId, position })
-    await fetchBoard()
+    setBoard((prev) => {
+      if (!prev) return prev
+      const sourceColumn = prev.columns.find((column) =>
+        column.tasks.some((task) => task.id === taskId)
+      )
+      if (!sourceColumn) return prev
+
+      return reorderTasksInBoard(prev, taskId, sourceColumn.id, columnId, position)
+    })
+
+    try {
+      await api.tasks.move(taskId, { columnId, position })
+    } finally {
+      await fetchBoard({ silent: true })
+    }
   }
 
   const handleCreateTask = async (data: any) => {

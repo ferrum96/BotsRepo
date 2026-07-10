@@ -1,9 +1,11 @@
 const API_BASE = '/api'
 
+const get = (url: string) => fetch(url, { cache: 'no-store' }).then(r => r.json())
+
 export const api = {
   boards: {
-    list: () => fetch(`${API_BASE}/boards`).then(r => r.json()),
-    get: (id: string) => fetch(`${API_BASE}/boards/${id}`).then(r => r.json()),
+    list: () => get(`${API_BASE}/boards`),
+    get: (id: string) => get(`${API_BASE}/boards/${id}`),
     create: (data: { name: string }) =>
       fetch(`${API_BASE}/boards`, {
         method: 'POST',

@@ -2,7 +2,11 @@ import { Draggable } from '@hello-pangea/dnd'
 import { Clock } from 'lucide-react'
 import { TaskWithDetails } from '@/lib/types'
 import { LabelBadge } from './LabelBadge'
-import { getPriorityColor, formatTaskId } from '@/lib/kanban-utils'
+import {
+  getPriorityBadgeColor,
+  getPriorityLabel,
+  formatTaskId,
+} from '@/lib/kanban-utils'
 
 type TaskCardProps = {
   task: TaskWithDetails
@@ -31,11 +35,12 @@ export function TaskCard({ task, index, onClick, mobile }: TaskCardProps) {
             <span className={`font-mono text-gray-400 ${mobile ? 'text-sm' : 'text-xs'}`}>
               {formatTaskId(task.taskNumber)}
             </span>
-            <span className={getPriorityColor(task.priority)}>
-              {task.priority === 'CRITICAL' && '🔴'}
-              {task.priority === 'HIGH' && '🟠'}
-              {task.priority === 'MEDIUM' && '🟡'}
-              {task.priority === 'LOW' && '🟢'}
+            <span
+              className={`inline-flex items-center px-2 py-0.5 rounded-full font-medium ${
+                mobile ? 'text-xs' : 'text-[11px]'
+              } ${getPriorityBadgeColor(task.priority)}`}
+            >
+              {getPriorityLabel(task.priority)}
             </span>
           </div>
 

@@ -1,7 +1,7 @@
 import { Hono } from 'hono'
 import { db } from '../db/index.js'
 import { boards, columns, tasks } from '../db/schema.js'
-import { eq, count } from 'drizzle-orm'
+import { eq, count, asc } from 'drizzle-orm'
 import { randomUUID } from 'crypto'
 
 const app = new Hono()
@@ -68,8 +68,10 @@ app.get('/:id', async (c) => {
     where: eq(boards.id, id),
     with: {
       columns: {
+        orderBy: [asc(columns.position)],
         with: {
           tasks: {
+            orderBy: [asc(tasks.position)],
             with: {
               epic: true,
               labels: {
