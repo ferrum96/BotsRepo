@@ -8,6 +8,7 @@ interface NavItem {
 
 const navItems: NavItem[] = [
   { to: '/members', label: 'Участники группы', icon: 'person_add' },
+  { to: '/inactive-members', label: 'Неактивные игроки', icon: 'hourglass_empty' },
   { to: '/blacklist', label: 'Блэклист', icon: 'block' },
 ]
 

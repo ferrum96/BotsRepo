@@ -16,7 +16,7 @@ from telegram.ext import (
 )
 
 from bot import messages as msg
-from bot.database import Database, Member, SurveyProgress
+from bot.database import Database, SurveyProgress
 from bot.keyboards import (
     activity_keyboard,
     age_keyboard,

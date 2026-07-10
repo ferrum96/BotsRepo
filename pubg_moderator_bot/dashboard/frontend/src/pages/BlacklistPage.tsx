@@ -11,24 +11,26 @@ import { EmptyState } from '../components/feedback/EmptyState'
 import { ErrorState } from '../components/feedback/ErrorState'
 import { Loader } from '../components/feedback/Loader'
 import { useBlacklist, useUnblockBlacklistMember } from '../features/blacklist/useBlacklist'
+import { useConfirmAction } from '../hooks/useConfirmAction'
 import { useDebounce } from '../hooks/useDebounce'
+import { matchesTextQuery } from '../utils/query'
 
 const PAGE_SIZE = 25
 
 export function BlacklistPage() {
   const [search, setSearch] = useState('')
-  const [confirmRestoreUserId, setConfirmRestoreUserId] = useState<number | null>(null)
+  const restoreConfirm = useConfirmAction<number>()
   const debouncedSearch = useDebounce(search, 250)
   const [page, setPage] = useState(1)
   const { data, isLoading, error, refetch } = useBlacklist()
   const unblockMember = useUnblockBlacklistMember()
 
   const filtered = (data || []).filter((entry) => {
-    const query = debouncedSearch.trim().toLowerCase()
-    if (!query) return true
-    return (
-      entry.game_nick?.toLowerCase().includes(query) ||
-      entry.real_name?.toLowerCase().includes(query)
+    return matchesTextQuery(
+      debouncedSearch,
+      entry.game_nick,
+      entry.real_name,
+      entry.discord_nick
     )
   })
 
@@ -38,19 +40,8 @@ export function BlacklistPage() {
 
   const columns: Column<BlacklistEntry>[] = [
     {
-      key: 'game_nick',
-      header: 'Ник в игре',
-      sortable: true,
-      cell: (row) => (
-        <span className="inline-block max-w-[120px] truncate text-center font-bold text-electric sm:max-w-none">
-          {row.game_nick || '—'}
-        </span>
-      ),
-    },
-    {
       key: 'real_name',
       header: 'Имя',
-      sortable: true,
       cell: (row) => (
         <span className="inline-block max-w-[120px] truncate text-center sm:max-w-none">
           {row.real_name || '—'}
@@ -58,9 +49,25 @@ export function BlacklistPage() {
       ),
     },
     {
+      key: 'game_nick',
+      header: 'Ник в игре',
+      cell: (row) => (
+        <span className="inline-block max-w-[120px] truncate text-center font-bold text-electric sm:max-w-none">
+          {row.game_nick || '—'}
+        </span>
+      ),
+    },
+
+    {
+      key: 'discord_nick',
+      header: 'Ник в Discord',
+      headerClassName: 'hidden sm:table-cell',
+      cellClassName: 'hidden sm:table-cell',
+      cell: (row) => row.discord_nick || '—',
+    },
+    {
       key: 'created_at',
       header: 'Дата добавления',
-      sortable: true,
       headerClassName: 'hidden md:table-cell',
       cellClassName: 'hidden md:table-cell',
       cell: (row) => (
@@ -85,7 +92,7 @@ export function BlacklistPage() {
         <Button
           variant="ghost"
           className="w-auto px-2 py-1 text-[11px] sm:text-[12px] text-emerald-400 hover:text-emerald-300 hover:bg-emerald-950/30 whitespace-nowrap"
-          onClick={() => setConfirmRestoreUserId(row.user_id)}
+          onClick={() => restoreConfirm.openFor(row.user_id)}
           disabled={unblockMember.isPending}
         >
           {unblockMember.isPending && unblockMember.variables === row.user_id
@@ -103,7 +110,7 @@ export function BlacklistPage() {
     <div>
       <PageHeader
         title="Блэклист"
-        placeholder="Ник в игре или имя..."
+        placeholder="Ник в игре, Discord или имя..."
         value={search}
         onChange={setSearch}
       />
@@ -132,17 +139,17 @@ export function BlacklistPage() {
         </>
       )}
       <ConfirmModal
-        open={confirmRestoreUserId !== null}
+        open={restoreConfirm.isOpen}
         title="Вы уверены?"
         message="Восстановить участника и убрать его из blacklist?"
         confirmLabel="Да"
         cancelLabel="Нет"
         isConfirming={unblockMember.isPending}
-        onCancel={() => setConfirmRestoreUserId(null)}
+        onCancel={restoreConfirm.close}
         onConfirm={() => {
-          if (confirmRestoreUserId === null) return
-          unblockMember.mutate(confirmRestoreUserId, {
-            onSuccess: () => setConfirmRestoreUserId(null),
+          if (restoreConfirm.target === null) return
+          unblockMember.mutate(restoreConfirm.target, {
+            onSuccess: restoreConfirm.close,
           })
         }}
       />

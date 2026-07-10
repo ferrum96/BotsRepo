@@ -274,18 +274,6 @@ class Database:
         rows = await cursor.fetchall()
         return [_row_to_member(r) for r in rows]
 
-    async def set_member_legacy(self, user_id: int, legacy: bool) -> bool:
-        db = await self.connect()
-        cursor = await db.execute(
-            """
-            UPDATE members SET is_legacy = ?
-            WHERE user_id = ?
-            """,
-            (1 if legacy else 0, user_id),
-        )
-        await db.commit()
-        return cursor.rowcount > 0
-
     async def set_member_last_match(
         self, user_id: int, last_match_at: Optional[str]
     ) -> bool:
@@ -302,6 +290,33 @@ class Database:
         )
         await db.commit()
         return cursor.rowcount > 0
+
+    async def set_member_inactive(self, user_id: int, inactive: bool) -> bool:
+        db = await self.connect()
+        cursor = await db.execute(
+            """
+            UPDATE members
+            SET is_inactive = ?
+            WHERE user_id = ?
+            """,
+            (1 if inactive else 0, user_id),
+        )
+        await db.commit()
+        return cursor.rowcount > 0
+
+    async def get_inactive_members(self) -> list[Member]:
+        """Return members marked as inactive and not blacklisted."""
+        db = await self.connect()
+        cursor = await db.execute(
+            """
+            SELECT * FROM members
+            WHERE is_inactive = 1
+              AND user_id NOT IN (SELECT user_id FROM blacklist)
+            ORDER BY last_match_at ASC, created_at DESC
+            """
+        )
+        rows = await cursor.fetchall()
+        return [_row_to_member(r) for r in rows]
 
     async def search_members(self, query: str) -> list[Member]:
         pattern = f"%{query.lower()}%"

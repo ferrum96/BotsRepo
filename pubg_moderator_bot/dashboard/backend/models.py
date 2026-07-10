@@ -9,7 +9,6 @@ from sqlalchemy import (
     Integer,
     String,
     create_engine,
-    func,
 )
 from sqlalchemy.orm import declarative_base, sessionmaker
 
@@ -34,6 +33,8 @@ class MemberORM(Base):
     perspective = Column(String, nullable=False)
     is_inactive = Column(Boolean, nullable=False, default=False)
     is_legacy = Column(Boolean, nullable=False, default=False)
+    last_match_at = Column(String, nullable=True)
+    last_match_checked_at = Column(String, nullable=True)
     created_at = Column(String, nullable=False, default=lambda: _now_utc().isoformat())
 
 

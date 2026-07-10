@@ -7,11 +7,12 @@ import { EmptyState } from '../components/feedback/EmptyState'
 import { ConfirmModal } from '../components/ui/ConfirmModal'
 import { MembersTable } from '../features/members/MembersTable'
 import { useMembers, useKickMember } from '../features/members/useMembers'
+import { useConfirmAction } from '../hooks/useConfirmAction'
 import { useDebounce } from '../hooks/useDebounce'
 
 export function MembersPage() {
   const [search, setSearch] = useState('')
-  const [confirmKickUserId, setConfirmKickUserId] = useState<number | null>(null)
+  const kickConfirm = useConfirmAction<number>()
   const debouncedSearch = useDebounce(search, 250)
   const { data, isLoading, error, refetch } = useMembers()
   const kickMember = useKickMember()
@@ -32,23 +33,23 @@ export function MembersPage() {
         <MembersTable
           members={data}
           search={debouncedSearch}
-          onKick={(userId) => setConfirmKickUserId(userId)}
+          onKick={kickConfirm.openFor}
           kickingUserId={kickMember.variables}
           isKicking={kickMember.isPending}
         />
       )}
       <ConfirmModal
-        open={confirmKickUserId !== null}
+        open={kickConfirm.isOpen}
         title="Вы уверены?"
         message="Удалить участника из группы?"
         confirmLabel="Да"
         cancelLabel="Нет"
         isConfirming={kickMember.isPending}
-        onCancel={() => setConfirmKickUserId(null)}
+        onCancel={kickConfirm.close}
         onConfirm={() => {
-          if (confirmKickUserId === null) return
-          kickMember.mutate(confirmKickUserId, {
-            onSuccess: () => setConfirmKickUserId(null),
+          if (kickConfirm.target === null) return
+          kickMember.mutate(kickConfirm.target, {
+            onSuccess: kickConfirm.close,
           })
         }}
       />
