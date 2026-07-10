@@ -16,61 +16,70 @@ fkandu_manager_bot/
 ├── dashboard/
 │   ├── backend/           # FastAPI (API для дашборда)
 │   │   ├── api.py
-│   │   └── Dockerfile
+│   │   └── Dockerfile.dev
 │   └── frontend/          # Next.js (дашборд)
 │       ├── src/
-│       │   ├── components/
-│       │   └── app/
-│       └── Dockerfile
+│       └── Dockerfile.dev
 ├── data/                  # SQLite база (leads.db)
-├── .env                   # Переменные окружения
-├── requirements.txt       # Python зависимости
-└── Dockerfile
+├── docker-compose.dev.yml # Локальная разработка
+├── .env.example
+└── requirements.txt
 ```
 
 ## Возможности
 
 - **Бот** — принимает заявки через Telegram (категория → товар → бюджет → сроки), оценивает лид, сохраняет в SQLite, уведомляет админа
 - **Файловый сервер** — отдаёт файлы из БД по URL (`/files/{file_id}`)
-- **Дашборд** — 5 страниц: метрики, канбан с drag-and-drop, список заявок с фильтрами, горячие лиды, аналитика
+- **Дашборд** — метрики, канбан с drag-and-drop, список заявок с фильтрами, горячие лиды, аналитика
 
 ## Запуск (разработка)
 
+### Docker (рекомендуется)
+
 ```bash
-# 1. Установить зависимости
-pip install -r requirements.txt
-
-# 2. Настроить .env
+cd fkandu_manager_bot
 cp .env.example .env
-# Заполните BOT_TOKEN, ADMIN_ID, HOSTNAME
+docker compose -f docker-compose.dev.yml up --build
+```
 
-# 3. Запустить бота (включает файловый сервер на порту 8088)
+| Сервис | URL |
+|--------|-----|
+| Dashboard | http://localhost:3010 |
+| API | http://localhost:8010 |
+
+См. [DEV.md](../DEV.md).
+
+### Без Docker
+
+```bash
+pip install -r requirements.txt
+cp .env.example .env
+
+# Бот + файловый сервер
 python -m bot.main
 
-# 4. Запустить API дашборда (отдельный терминал)
+# API (отдельный терминал)
 cd dashboard/backend
 pip install -r requirements.txt
 uvicorn api:app --host 0.0.0.0 --port 8000
 
-# 5. Запустить фронтенд дашборда (отдельный терминал)
+# Frontend (отдельный терминал)
 cd dashboard/frontend
 npm install
 npm run dev
 ```
 
-## Docker
+## Production (VPS)
 
-```bash
-cd fkandu_manager_bot
-docker compose up -d --build
-```
+На сервере используется **systemd**, не Docker:
 
-Сервисы:
-- **https://IP:444** — дашборд fkandu
-- **https://IP:445** — backend API
-- **https://IP:443** — kanban-доска
+| URL | Сервис |
+|-----|--------|
+| http://IP:444 | fkandu-dashboard |
+| http://IP:445 | fkandu-api |
+| http://IP:446 | fkandu-bot (файлы) |
 
-Проксирует Caddy (корневой `docker-compose.yml`).
+См. [DEPLOY.md](../DEPLOY.md).
 
 ## Переменные окружения
 

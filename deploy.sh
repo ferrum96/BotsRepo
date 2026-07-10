@@ -16,7 +16,20 @@ SERVICES=(
   fkandu-bot
   pubg-api
   pubg-bot
+  deploy-webhook
 )
+
+NEEDS_KANBAN=false
+NEEDS_FKANDU_DASHBOARD=false
+NEEDS_FKANDU_API=false
+NEEDS_FKANDU_BOT=false
+NEEDS_PUBG_API=false
+NEEDS_PUBG_BOT=false
+NEEDS_PUBG_FRONTEND_BUILD=false
+NEEDS_PUBG_PIP=false
+NEEDS_PUBG_MIGRATE=false
+RESTART_SERVICES=()
+CHANGED_FILES=""
 
 if [ -f "$PORTS_FILE" ]; then
   set -a
@@ -24,6 +37,146 @@ if [ -f "$PORTS_FILE" ]; then
   source "$PORTS_FILE"
   set +a
 fi
+
+mark_all_services() {
+  NEEDS_KANBAN=true
+  NEEDS_FKANDU_DASHBOARD=true
+  NEEDS_FKANDU_API=true
+  NEEDS_FKANDU_BOT=true
+  NEEDS_PUBG_API=true
+  NEEDS_PUBG_BOT=true
+  NEEDS_PUBG_FRONTEND_BUILD=true
+  NEEDS_PUBG_PIP=true
+  NEEDS_PUBG_MIGRATE=true
+}
+
+mark_service_for_restart() {
+  local service="$1"
+  local already=false
+  for existing in "${RESTART_SERVICES[@]}"; do
+    if [ "$existing" = "$service" ]; then
+      already=true
+      break
+    fi
+  done
+  if [ "$already" = false ]; then
+    RESTART_SERVICES+=("$service")
+  fi
+}
+
+mark_services_from_file() {
+  local file="$1"
+
+  case "$file" in
+    kanban_board/*)
+      NEEDS_KANBAN=true
+      mark_service_for_restart kanban
+      ;;
+    fkandu_manager_bot/dashboard/frontend/*)
+      NEEDS_FKANDU_DASHBOARD=true
+      mark_service_for_restart fkandu-dashboard
+      ;;
+    fkandu_manager_bot/dashboard/backend/*)
+      NEEDS_FKANDU_API=true
+      mark_service_for_restart fkandu-api
+      ;;
+    fkandu_manager_bot/bot/*)
+      NEEDS_FKANDU_BOT=true
+      mark_service_for_restart fkandu-bot
+      ;;
+    fkandu_manager_bot/requirements.txt)
+      NEEDS_FKANDU_BOT=true
+      mark_service_for_restart fkandu-bot
+      ;;
+    pubg_moderator_bot/dashboard/frontend/*)
+      NEEDS_PUBG_API=true
+      NEEDS_PUBG_FRONTEND_BUILD=true
+      mark_service_for_restart pubg-api
+      ;;
+    pubg_moderator_bot/dashboard/backend/*)
+      NEEDS_PUBG_API=true
+      NEEDS_PUBG_PIP=true
+      mark_service_for_restart pubg-api
+      ;;
+    pubg_moderator_bot/bot/*)
+      NEEDS_PUBG_API=true
+      NEEDS_PUBG_BOT=true
+      NEEDS_PUBG_PIP=true
+      mark_service_for_restart pubg-api
+      mark_service_for_restart pubg-bot
+      ;;
+    pubg_moderator_bot/requirements.txt)
+      NEEDS_PUBG_API=true
+      NEEDS_PUBG_BOT=true
+      NEEDS_PUBG_PIP=true
+      mark_service_for_restart pubg-api
+      mark_service_for_restart pubg-bot
+      ;;
+    pubg_moderator_bot/alembic/*|pubg_moderator_bot/alembic.ini)
+      NEEDS_PUBG_API=true
+      NEEDS_PUBG_BOT=true
+      NEEDS_PUBG_PIP=true
+      NEEDS_PUBG_MIGRATE=true
+      mark_service_for_restart pubg-api
+      mark_service_for_restart pubg-bot
+      ;;
+    systemd/kanban.service)
+      NEEDS_KANBAN=true
+      mark_service_for_restart kanban
+      ;;
+    systemd/fkandu-dashboard.service)
+      NEEDS_FKANDU_DASHBOARD=true
+      mark_service_for_restart fkandu-dashboard
+      ;;
+    systemd/fkandu-api.service)
+      NEEDS_FKANDU_API=true
+      mark_service_for_restart fkandu-api
+      ;;
+    systemd/fkandu-bot.service)
+      NEEDS_FKANDU_BOT=true
+      mark_service_for_restart fkandu-bot
+      ;;
+    systemd/pubg-api.service)
+      NEEDS_PUBG_API=true
+      mark_service_for_restart pubg-api
+      ;;
+    systemd/pubg-bot.service)
+      NEEDS_PUBG_BOT=true
+      mark_service_for_restart pubg-bot
+      ;;
+    systemd/deploy-webhook.service|webhook.py|deploy/webhook.env|deploy/webhook.env.example)
+      mark_service_for_restart deploy-webhook
+      ;;
+    nginx/*)
+      :
+      ;;
+    deploy/ports.env)
+      for service in "${SERVICES[@]}"; do
+        mark_service_for_restart "$service"
+      done
+      ;;
+  esac
+}
+
+detect_changed_services() {
+  if [ "${DEPLOY_ALL:-0}" = "1" ]; then
+    echo "DEPLOY_ALL=1 — полный деплой всех сервисов"
+    mark_all_services
+    for service in "${SERVICES[@]}"; do
+      mark_service_for_restart "$service"
+    done
+    return
+  fi
+
+  if [ -z "$CHANGED_FILES" ]; then
+    return
+  fi
+
+  while IFS= read -r file; do
+    [ -n "$file" ] || continue
+    mark_services_from_file "$file"
+  done <<< "$CHANGED_FILES"
+}
 
 install_systemd_units() {
   if [ ! -d "$SYSTEMD_SRC" ]; then
@@ -37,12 +190,14 @@ install_systemd_units() {
   for unit_path in "${SYSTEMD_SRC}"/*.service; do
     [ -f "$unit_path" ] || continue
     unit_name=$(basename "$unit_path")
+    service_name="${unit_name%.service}"
     dest="${SYSTEMD_DST}/${unit_name}"
 
     if [ ! -f "$dest" ] || ! cmp -s "$unit_path" "$dest"; then
       cp "$unit_path" "$dest"
       echo "  → ${unit_name}"
       units_changed=true
+      mark_service_for_restart "$service_name"
     fi
   done
 
@@ -65,13 +220,20 @@ install_systemd_units() {
 }
 
 restart_services() {
-  echo "Перезапуск сервисов..."
-  for service in "${SERVICES[@]}"; do
+  if [ ${#RESTART_SERVICES[@]} -eq 0 ]; then
+    echo "Перезапуск сервисов: не требуется (изменений в коде нет)"
+    return
+  fi
+
+  echo "Перезапуск сервисов: ${RESTART_SERVICES[*]}"
+  for service in "${RESTART_SERVICES[@]}"; do
     if [ ! -f "${SYSTEMD_DST}/${service}.service" ]; then
+      echo "  пропуск ${service}: unit-файл не найден"
       continue
     fi
     if systemctl is-active --quiet "$service" 2>/dev/null; then
       systemctl restart "$service"
+      echo "  restart ${service}"
     else
       systemctl start "$service"
       echo "  start ${service} (первый запуск)"
@@ -134,73 +296,126 @@ verify_pubg_api() {
   return 1
 }
 
-echo "=== Деплой всех сервисов ==="
+should_restart_pubg_api() {
+  local service
+  for service in "${RESTART_SERVICES[@]}"; do
+    if [ "$service" = "pubg-api" ]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+echo "=== Деплой (selective) ==="
 echo ""
 
 cd "$REPO_DIR"
 
+OLD_HEAD="$(git rev-parse HEAD)"
 echo "Pull изменений..."
 git pull origin main
+NEW_HEAD="$(git rev-parse HEAD)"
+
+if [ "$OLD_HEAD" != "$NEW_HEAD" ]; then
+  CHANGED_FILES="$(git diff --name-only "$OLD_HEAD" "$NEW_HEAD")"
+  echo "Изменено файлов: $(echo "$CHANGED_FILES" | sed '/^$/d' | wc -l | tr -d ' ')"
+else
+  echo "Новых коммитов нет"
+fi
 echo ""
 
+detect_changed_services
 install_systemd_units
 
-## Kanban Board
-echo "Kanban Board: npm ci + build..."
-cd kanban_board
-npm ci --silent
-npm run build
-cd ..
-
-## Fkandu Dashboard
-echo "Fkandu Dashboard: npm ci + build..."
-cd fkandu_manager_bot/dashboard/frontend
-npm ci --silent
-npm run build
-cp -r .next/static .next/standalone/.next/static
-cp -r public .next/standalone/public
-cd ../../..
-
-## Fkandu API
-echo "Fkandu API: pip install..."
-cd fkandu_manager_bot/dashboard/backend
-pip3 install -q -r requirements.txt
-cd ../../..
-
-## Fkandu Bot
-echo "Fkandu Bot: pip install..."
-cd fkandu_manager_bot
-pip3 install -q -r requirements.txt
-cd ..
-
-## PUBG Bot + Dashboard
-echo "PUBG: pip install + frontend build + migrations..."
-cd "$PUBG_DIR"
-
-if [ -f .env ]; then
-  set -a
-  # shellcheck disable=SC1091
-  source .env
-  set +a
-  export VITE_DASHBOARD_API_KEY="${DASHBOARD_API_KEY:-}"
+if [ "$NEEDS_KANBAN" = true ]; then
+  echo "Kanban Board: npm ci + build..."
+  cd kanban_board
+  npm ci --silent
+  npm run build
+  cd "$REPO_DIR"
+else
+  echo "Kanban Board: без изменений — пропуск сборки"
 fi
 
-pip3 install -q -r requirements.txt
-alembic upgrade head
+if [ "$NEEDS_FKANDU_DASHBOARD" = true ]; then
+  echo "Fkandu Dashboard: npm ci + build..."
+  cd fkandu_manager_bot/dashboard/frontend
+  npm ci --silent
+  npm run build
+  cp -r .next/static .next/standalone/.next/static
+  cp -r public .next/standalone/public
+  cd "$REPO_DIR"
+else
+  echo "Fkandu Dashboard: без изменений — пропуск сборки"
+fi
 
-cd dashboard/frontend
-npm ci --silent
-npm run build
-cd "$REPO_DIR"
+if [ "$NEEDS_FKANDU_API" = true ]; then
+  echo "Fkandu API: pip install..."
+  cd fkandu_manager_bot/dashboard/backend
+  pip3 install -q -r requirements.txt
+  cd "$REPO_DIR"
+else
+  echo "Fkandu API: без изменений — пропуск pip install"
+fi
+
+if [ "$NEEDS_FKANDU_BOT" = true ]; then
+  echo "Fkandu Bot: pip install..."
+  cd fkandu_manager_bot
+  pip3 install -q -r requirements.txt
+  cd "$REPO_DIR"
+else
+  echo "Fkandu Bot: без изменений — пропуск pip install"
+fi
+
+if [ "$NEEDS_PUBG_API" = true ] || [ "$NEEDS_PUBG_BOT" = true ]; then
+  echo "PUBG: обновление..."
+  cd "$PUBG_DIR"
+
+  if [ -f .env ]; then
+    set -a
+    # shellcheck disable=SC1091
+    source .env
+    set +a
+    export VITE_DASHBOARD_API_KEY="${DASHBOARD_API_KEY:-}"
+  fi
+
+  if [ "$NEEDS_PUBG_PIP" = true ] || [ "$NEEDS_PUBG_API" = true ] || [ "$NEEDS_PUBG_BOT" = true ]; then
+    pip3 install -q -r requirements.txt
+  fi
+
+  if [ "$NEEDS_PUBG_MIGRATE" = true ]; then
+    alembic upgrade head
+  fi
+
+  if [ "$NEEDS_PUBG_FRONTEND_BUILD" = true ]; then
+    cd dashboard/frontend
+    npm ci --silent
+    npm run build
+    cd "$PUBG_DIR"
+  fi
+
+  cd "$REPO_DIR"
+else
+  echo "PUBG: без изменений — пропуск сборки"
+fi
 
 echo ""
 restart_services
 
 install_nginx_config
 reload_nginx
-verify_pubg_api || true
+
+if should_restart_pubg_api; then
+  verify_pubg_api || true
+else
+  echo "pubg-api не перезапускался — пропуск health-check"
+fi
 
 echo ""
 echo "=== Деплой завершен ==="
-echo "Порты: fkandu :444/:445/:446 | pubg :447 (→:${PORT_PUBG_API:-8080}) | kanban :448 (→:${PORT_KANBAN:-3002})"
-systemctl status kanban fkandu-dashboard fkandu-api fkandu-bot pubg-api pubg-bot --no-pager
+echo "Порты: fkandu :444/:445/:446 | pubg :447 (→:${PORT_PUBG_API:-8080}) | kanban :448 (→:${PORT_KANBAN:-3002}) | webhook :449 (→:${PORT_DEPLOY_WEBHOOK:-9000})"
+if [ ${#RESTART_SERVICES[@]} -gt 0 ]; then
+  systemctl status "${RESTART_SERVICES[@]}" --no-pager
+else
+  echo "Сервисы не перезапускались"
+fi

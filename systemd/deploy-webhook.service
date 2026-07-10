@@ -1,0 +1,16 @@
+[Unit]
+Description=GitHub Deploy Webhook
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/BotsRepo
+EnvironmentFile=/root/BotsRepo/deploy/ports.env
+EnvironmentFile=-/root/BotsRepo/deploy/webhook.env
+ExecStart=/usr/bin/python3 /root/BotsRepo/webhook.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

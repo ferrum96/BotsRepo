@@ -25,8 +25,8 @@ Dev-порты **не конфликтуют** с production — см. `deploy/p
 |--------|-----|
 | FKandu dashboard | http://localhost:3010 |
 | FKandu API | http://localhost:8010 |
-| Kanban (UI) | http://localhost:5173 |
-| Kanban (API) | http://localhost:3001 |
+| Kanban (UI, Vite) | http://localhost:5173 |
+| Kanban (API, Hono) | http://localhost:3001 |
 | PUBG dashboard (Vite) | http://localhost:5174 |
 | PUBG API | http://localhost:8081 |
 
@@ -37,20 +37,50 @@ cd pubg_moderator_bot
 docker compose -f docker-compose.dev.yml up --build
 ```
 
-- **pubg-dashboard** — hot reload фронта
-- **pubg-api** — FastAPI с `--reload`
-- **pubg-bot** — бот в `network_mode: host`
+- **pubg-dashboard** — hot reload фронта (Vite)
+- **pubg-api** — FastAPI с `--reload`, миграции Alembic при старте
+- **pubg-bot** — бот в `network_mode: host` (нужен для Telegram polling и группы)
 
 Остановка: `docker compose -f docker-compose.dev.yml down`
+
+Пересборка только бота после изменений в Python:
+
+```bash
+docker compose -f docker-compose.dev.yml build --no-cache pubg-bot
+docker compose -f docker-compose.dev.yml up -d pubg-bot
+docker compose -f docker-compose.dev.yml logs -f pubg-bot
+```
+
+## FKandu — типичный workflow
+
+```bash
+cd fkandu_manager_bot
+docker compose -f docker-compose.dev.yml up --build
+```
+
+- **fkandu-dashboard** — Next.js dev
+- **fkandu-api** — FastAPI
+- **fkandu-bot** — Telegram-бот + файловый сервер (`network_mode: host`)
+
+## Kanban — типичный workflow
+
+```bash
+cd kanban_board
+docker compose -f docker-compose.dev.yml up --build
+```
+
+- **kanban** — Hono API + Vite UI в одном dev-контейнере
 
 ## Что не использовать локально
 
 | Файл | Назначение |
 |------|------------|
-| `docker-compose.yml` (без `.dev`) | Production-like Docker, не для dev |
-| `nginx/nginx.conf` | VPS reverse proxy 444–448, на локалке не нужен |
-| `deploy.sh` | Только для сервера (systemd) |
+| `nginx/nginx-systemd.conf` | Production reverse proxy (порты 444–449), на локалке не нужен |
+| `deploy.sh` | Production-деплой через systemd |
+| `webhook.py` | GitHub webhook для автодеплоя на VPS |
 
 ## Порты
 
 Полная карта: `deploy/ports.env`.
+
+Production webhook (только VPS): `http://IP:449/` → `127.0.0.1:9000`.
