@@ -18,6 +18,7 @@ from telegram.ext import (
     CommandHandler,
 )
 
+from bot.activity_monitor import refresh_group_activity
 from bot.config import Config
 from bot.database import Database
 from bot.handlers.admin import (
@@ -59,6 +60,16 @@ async def post_init(application: Application) -> None:
         result["errors"],
     )
 
+    activity_result = await refresh_group_activity(application.bot, db, config)
+    logger.info(
+        "Initial activity refresh: group_total=%s checked=%s inactive=%s added=%s errors=%s",
+        activity_result["group_total"],
+        activity_result["checked"],
+        activity_result["inactive"],
+        activity_result["added_to_inactive"],
+        activity_result["errors"],
+    )
+
     if application.job_queue:
         interval_sec = max(60, config.group_sync_interval_minutes * 60)
         application.job_queue.run_repeating(
@@ -71,6 +82,14 @@ async def post_init(application: Application) -> None:
             "Scheduled group sync every %s minutes",
             config.group_sync_interval_minutes,
         )
+        day_interval_sec = 24 * 60 * 60
+        application.job_queue.run_repeating(
+            _refresh_activity_job,
+            interval=day_interval_sec,
+            first=day_interval_sec,
+            name="refresh_group_activity",
+        )
+        logger.info("Scheduled inactivity refresh every 24 hours")
 
 
 async def _sync_group_job(context) -> None:
@@ -83,6 +102,20 @@ async def _sync_group_job(context) -> None:
         result["present"],
         result["missing"],
         result["blacklisted"],
+        result["errors"],
+    )
+
+
+async def _refresh_activity_job(context) -> None:
+    db: Database = context.application.bot_data["db"]
+    config: Config = context.application.bot_data["config"]
+    result = await refresh_group_activity(context.bot, db, config)
+    logger.info(
+        "Periodic activity refresh: group_total=%s checked=%s inactive=%s added=%s errors=%s",
+        result["group_total"],
+        result["checked"],
+        result["inactive"],
+        result["added_to_inactive"],
         result["errors"],
     )
 

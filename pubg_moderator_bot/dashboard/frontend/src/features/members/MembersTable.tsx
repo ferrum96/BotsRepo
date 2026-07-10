@@ -5,7 +5,7 @@ import { Button } from '../../components/ui/Button'
 import { DataTable, Column } from '../../components/table/DataTable'
 import { Pagination } from '../../components/table/Pagination'
 import { formatJoinDate, perspectiveLabel } from '../../utils/formatters'
-import { sortMembers, SortState } from '../../utils/sorters'
+import { matchesTextQuery } from '../../utils/query'
 
 const PAGE_SIZE = 25
 
@@ -24,39 +24,22 @@ export function MembersTable({
   kickingUserId,
   isKicking = false,
 }: MembersTableProps) {
-  const [sort, setSort] = useState<SortState>({ key: null, direction: 'asc' })
   const [page, setPage] = useState(1)
 
   const filtered = useMemo(() => {
-    const query = search.trim().toLowerCase()
-    if (!query) return members
     return members.filter(
-      (m) =>
-        m.game_nick.toLowerCase().includes(query) ||
-        m.real_name.toLowerCase().includes(query) ||
-        (m.discord_nick && m.discord_nick.toLowerCase().includes(query)) ||
-        (m.tg_username && m.tg_username.toLowerCase().includes(query))
+      (m) => matchesTextQuery(search, m.game_nick, m.real_name, m.discord_nick, m.tg_username)
     )
   }, [members, search])
 
-  const sorted = useMemo(() => sortMembers(filtered, sort), [filtered, sort])
-  const totalPages = Math.max(1, Math.ceil(sorted.length / PAGE_SIZE))
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE))
   const pageSafe = Math.min(page, totalPages)
-  const paged = sorted.slice((pageSafe - 1) * PAGE_SIZE, pageSafe * PAGE_SIZE)
-
-  const handleSort = (key: string) => {
-    setSort((prev) => ({
-      key: key as keyof Member,
-      direction: prev.key === key && prev.direction === 'asc' ? 'desc' : 'asc',
-    }))
-    setPage(1)
-  }
+  const paged = filtered.slice((pageSafe - 1) * PAGE_SIZE, pageSafe * PAGE_SIZE)
 
   const columns: Column<Member>[] = [
     {
       key: 'real_name',
       header: 'Имя',
-      sortable: true,
       cell: (row) => (
         <span className="inline-block max-w-[120px] truncate text-center sm:max-w-none">
           {row.real_name}
@@ -66,7 +49,6 @@ export function MembersTable({
     {
       key: 'game_nick',
       header: 'Ник в игре',
-      sortable: true,
       cell: (row) => (
         <div className="flex items-center justify-center gap-1 sm:gap-2">
           <span className="inline-block max-w-[120px] truncate text-center font-bold text-electric sm:max-w-none">
@@ -78,7 +60,6 @@ export function MembersTable({
     {
       key: 'discord_nick',
       header: 'Ник в Discord',
-      sortable: true,
       headerClassName: 'hidden sm:table-cell',
       cellClassName: 'hidden sm:table-cell',
       cell: (row) => row.discord_nick || '—',
@@ -86,13 +67,11 @@ export function MembersTable({
     {
       key: 'perspective',
       header: 'Режим',
-      sortable: true,
       cell: (row) => <span className="text-on-surface-variant">{perspectiveLabel(row.perspective)}</span>,
     },
     {
       key: 'join_date',
       header: 'Дата присоединения',
-      sortable: true,
       headerClassName: 'hidden md:table-cell',
       cellClassName: 'hidden md:table-cell',
       cell: (row) => <span className="text-on-surface-variant">{formatJoinDate(row.join_date)}</span>,
@@ -119,9 +98,6 @@ export function MembersTable({
         columns={columns}
         data={paged}
         keyExtractor={(row) => row.user_id}
-        sortKey={sort.key}
-        sortDirection={sort.direction}
-        onSort={handleSort}
       />
       <Pagination page={pageSafe} totalPages={totalPages} onPageChange={setPage} />
     </div>

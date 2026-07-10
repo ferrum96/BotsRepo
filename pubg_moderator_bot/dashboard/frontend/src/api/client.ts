@@ -33,7 +33,17 @@ export interface BlacklistEntry {
   user_id: number
   game_nick: string | null
   real_name: string | null
+  discord_nick: string | null
   created_at: string
+}
+
+export interface InactiveMember {
+  user_id: number
+  game_nick: string
+  real_name: string
+  discord_nick: string | null
+  last_match_at: string | null
+  last_match_checked_at: string | null
 }
 
 export interface Stats {
@@ -46,13 +56,9 @@ export const fetchMembers = () => fetchJson<Member[]>('/api/members')
 
 export const fetchBlacklist = () => fetchJson<BlacklistEntry[]>('/api/blacklist')
 
-export const fetchStats = () => fetchJson<Stats>('/api/stats')
+export const fetchInactiveMembers = () => fetchJson<InactiveMember[]>('/api/inactive-members')
 
-export const setMemberLegacy = (userId: number, isLegacy: boolean) =>
-  fetchJson<{ ok: boolean }>(`/api/members/${userId}/legacy`, {
-    method: 'POST',
-    body: JSON.stringify({ is_legacy: isLegacy }),
-  })
+export const fetchStats = () => fetchJson<Stats>('/api/stats')
 
 export const kickMember = (userId: number) =>
   fetchJson<{ ok: boolean }>(`/api/members/${userId}/kick`, {

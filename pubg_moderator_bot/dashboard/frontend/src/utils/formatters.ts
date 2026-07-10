@@ -23,9 +23,3 @@ export function perspectiveLabel(value: string): string {
   }
   return labels[value] || value
 }
-
-export function statusBadge(isRemoved: boolean) {
-  return isRemoved
-    ? { text: 'Удалён', className: 'border-red-900 text-red-500 bg-red-950/30' }
-    : { text: 'Активен', className: 'border-outline-level text-emerald-400' }
-}

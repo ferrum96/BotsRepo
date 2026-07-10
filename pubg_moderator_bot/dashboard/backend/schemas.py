@@ -24,14 +24,23 @@ class BlacklistOut(BaseModel):
     user_id: int
     game_nick: Optional[str] = None
     real_name: Optional[str] = None
+    discord_nick: Optional[str] = None
     created_at: str
 
     class Config:
         from_attributes = True
 
 
-class MemberToggleLegacy(BaseModel):
-    is_legacy: bool
+class InactiveMemberOut(BaseModel):
+    user_id: int
+    game_nick: str
+    real_name: str
+    discord_nick: Optional[str]
+    last_match_at: Optional[str]
+    last_match_checked_at: Optional[str]
+
+    class Config:
+        from_attributes = True
 
 
 class StatsOut(BaseModel):

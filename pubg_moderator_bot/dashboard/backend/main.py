@@ -7,7 +7,6 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional, Set
-from urllib.parse import quote
 
 import httpx
 from fastapi import Depends, FastAPI, HTTPException, Request, Security
@@ -20,7 +19,6 @@ from bot.config import Config
 from bot.database import Database, Member, get_member_join_date
 from bot.group_titles import remove_from_group_header
 from dashboard.backend import schemas
-from dashboard.backend.models import make_engine, make_session
 
 logger = logging.getLogger(__name__)
 
@@ -28,8 +26,6 @@ BASE_DIR = Path(__file__).resolve().parent.parent.parent
 FRONTEND_DIST = BASE_DIR / "dashboard" / "frontend" / "dist"
 
 config = Config.from_env()
-engine = make_engine(config.database_path)
-SessionLocal = make_session(engine)
 
 api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
 
@@ -177,10 +173,33 @@ async def list_blacklist(
                 user_id=uid,
                 game_nick=member.game_nick if member else None,
                 real_name=member.real_name if member else None,
+                discord_nick=member.discord_nick if member else None,
                 created_at=created_at,
             )
         )
     return result
+
+
+@app.get("/api/inactive-members", response_model=list[schemas.InactiveMemberOut])
+async def list_inactive_members(
+    request: Request,
+    db: Database = Depends(get_db),
+    _: None = Security(_verify_api_key),
+):
+    members = await db.get_inactive_members()
+    group_ids = await db.get_group_member_ids()
+    return [
+        schemas.InactiveMemberOut(
+            user_id=member.user_id,
+            game_nick=member.game_nick,
+            real_name=member.real_name,
+            discord_nick=member.discord_nick,
+            last_match_at=member.last_match_at,
+            last_match_checked_at=member.last_match_checked_at,
+        )
+        for member in members
+        if member.user_id in group_ids
+    ]
 
 
 @app.get("/api/stats", response_model=schemas.StatsOut)
@@ -197,20 +216,6 @@ async def get_stats(
         total_blacklist=len(blacklist),
         perspective_stats=perspective_stats,
     )
-
-
-@app.post("/api/members/{user_id}/legacy")
-async def toggle_legacy(
-    request: Request,
-    user_id: int,
-    payload: schemas.MemberToggleLegacy,
-    db: Database = Depends(get_db),
-    _: None = Security(_verify_api_key),
-):
-    ok = await db.set_member_legacy(user_id, payload.is_legacy)
-    if not ok:
-        raise HTTPException(status_code=404, detail="Member not found")
-    return {"ok": True}
 
 
 @app.post("/api/members/{user_id}/kick")
