@@ -18,7 +18,9 @@ app.add_middleware(
 )
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DB_PATH = os.getenv("DB_PATH", os.path.join(BASE_DIR, "data", "leads.db"))
+PROJECT_ROOT = os.path.abspath(os.path.join(BASE_DIR, "..", ".."))
+DEFAULT_DB_PATH = os.path.join(PROJECT_ROOT, "data", "leads.db")
+DB_PATH = os.getenv("DB_PATH", DEFAULT_DB_PATH)
 
 os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
 

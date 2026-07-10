@@ -26,6 +26,7 @@ services:
       - "8010:8000"
     volumes:
       - ./dashboard/backend:/app
+      - ./data:/app/data
     environment:
       - DB_PATH=/app/data/leads.db
 
