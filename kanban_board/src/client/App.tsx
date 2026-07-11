@@ -1,19 +1,45 @@
 import { useState, useEffect, useCallback } from 'react'
+import { useNavigate, useParams } from 'react-router-dom'
 import { Sidebar } from './components/Sidebar'
 import { BoardView } from './components/BoardView'
+import { TaskDetailsPage } from './components/TaskDetailsPage'
 import { api } from './lib/api'
 import { reorderTasksInBoard } from './lib/kanban-utils'
 import { Board, BoardWithDetails } from './lib/types'
 
 const STORAGE_KEY = 'kanban-selected-board'
 
+function readStorage(key: string) {
+  try {
+    return localStorage.getItem(key)
+  } catch {
+    return null
+  }
+}
+
+function writeStorage(key: string, value: string) {
+  try {
+    localStorage.setItem(key, value)
+  } catch {
+    // Ignore Safari private mode storage errors.
+  }
+}
+
 export default function App() {
+  const navigate = useNavigate()
+  const { boardId: routeBoardId, taskId } = useParams()
   const [boards, setBoards] = useState<(Board & { _count: { tasks: number } })[]>([])
   const [selectedBoardId, setSelectedBoardId] = useState<string | null>(() => {
-    return localStorage.getItem(STORAGE_KEY)
+    return readStorage(STORAGE_KEY)
   })
   const [board, setBoard] = useState<BoardWithDetails | null>(null)
   const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    if (!routeBoardId) return
+    setSelectedBoardId(routeBoardId)
+    writeStorage(STORAGE_KEY, routeBoardId)
+  }, [routeBoardId])
 
   const fetchBoards = useCallback(async () => {
     try {
@@ -54,7 +80,8 @@ export default function App() {
 
   const handleSelectBoard = (id: string) => {
     setSelectedBoardId(id)
-    localStorage.setItem(STORAGE_KEY, id)
+    writeStorage(STORAGE_KEY, id)
+    navigate('/')
   }
 
   const handleMoveTask = async (taskId: string, columnId: string, position: number) => {
@@ -116,6 +143,19 @@ export default function App() {
           <div className="flex items-center justify-center h-full">
             <div className="text-gray-500">Загрузка...</div>
           </div>
+        ) : taskId && board ? (
+          <TaskDetailsPage
+            board={board}
+            taskId={taskId}
+            onBack={() => navigate('/')}
+            onUpdateTask={async (id, data) => {
+              await api.tasks.update(id, data)
+              // Avoid full board refetch for metadata-only updates (e.g. inline image insert),
+              // otherwise the details form state gets reset while user is editing.
+              if (Object.keys(data).length === 1 && 'meta' in data) return
+              await fetchBoard()
+            }}
+          />
         ) : board ? (
           <BoardView
             board={board}

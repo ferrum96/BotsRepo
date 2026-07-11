@@ -34,6 +34,7 @@ export type Task = {
   priority: string
   assignee: string | null
   estimatedTime: string | null
+  meta: string
   position: number
   createdAt: Date
   updatedAt: Date
