@@ -5,7 +5,7 @@ After=network.target
 [Service]
 Type=simple
 User=root
-WorkingDirectory=/root/BotsRepo
+WorkingDirectory=/root/BotsRepo/deploy
 EnvironmentFile=/root/BotsRepo/deploy/ports.env
 EnvironmentFile=-/root/BotsRepo/deploy/webhook.env
 ExecStart=/usr/bin/python3 /root/BotsRepo/deploy/webhook.py
