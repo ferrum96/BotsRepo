@@ -3,7 +3,7 @@
 import sqlite3
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from typing import Optional
 from contextlib import contextmanager
 import os
@@ -21,6 +21,15 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.abspath(os.path.join(BASE_DIR, "..", ".."))
 DEFAULT_DB_PATH = os.path.join(PROJECT_ROOT, "data", "leads.db")
 DB_PATH = os.getenv("DB_PATH", DEFAULT_DB_PATH)
+
+
+def default_bind_host() -> str:
+    in_docker = os.path.exists("/.dockerenv") or os.getenv("RUNNING_IN_DOCKER") == "1"
+    return "0.0.0.0" if in_docker else "127.0.0.1"  # nosec B104
+
+
+API_BIND_HOST = os.getenv("API_BIND_HOST", default_bind_host())
+API_PORT = int(os.getenv("API_PORT", "8000"))
 
 os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
 
@@ -71,10 +80,15 @@ def get_db():
 
 
 class LeadUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     status: Optional[str] = None
     admin_comment: Optional[str] = None
     next_contact: Optional[str] = None
     deal_amount: Optional[float] = None
+
+
+ALLOWED_UPDATE_FIELDS = {"status", "admin_comment", "next_contact", "deal_amount"}
 
 
 @app.get("/api/health")
@@ -105,10 +119,18 @@ def update_lead(lead_id: int, data: LeadUpdate):
     fields = {k: v for k, v in data.model_dump().items() if v is not None}
     if not fields:
         raise HTTPException(400, "No fields to update")
+    unknown_fields = set(fields) - ALLOWED_UPDATE_FIELDS
+    if unknown_fields:
+        raise HTTPException(400, "Unsupported fields in update payload")
     sets = ", ".join(f"{k} = ?" for k in fields)
     vals = list(fields.values()) + [lead_id]
     with get_db() as conn:
-        conn.execute(f"UPDATE leads SET {sets}, updated_at = CURRENT_TIMESTAMP WHERE id = ?", vals)
+        cur = conn.execute(
+            f"UPDATE leads SET {sets}, updated_at = CURRENT_TIMESTAMP WHERE id = ?",  # nosec B608
+            vals,
+        )
+        if cur.rowcount == 0:
+            raise HTTPException(404, "Lead not found")
         conn.commit()
     return {"ok": True}
 
@@ -158,4 +180,4 @@ def get_stats():
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host=API_BIND_HOST, port=API_PORT)

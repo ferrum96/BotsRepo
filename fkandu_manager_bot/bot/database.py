@@ -7,6 +7,8 @@ from typing import Optional
 
 
 class Database:
+    _updatable_lead_fields = {"status", "admin_comment", "next_contact", "deal_amount"}
+
     def __init__(self, db_path: str):
         self.db_path = db_path
         os.makedirs(os.path.dirname(db_path), exist_ok=True)
@@ -100,15 +102,17 @@ class Database:
         fields = {k: v for k, v in data.items() if v is not None}
         if not fields:
             return False
+        if not set(fields).issubset(self._updatable_lead_fields):
+            return False
         sets = ", ".join(f"{k} = ?" for k in fields)
         vals = list(fields.values()) + [lead_id]
         with self._get_conn() as conn:
-            conn.execute(
-                f"UPDATE leads SET {sets}, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+            cur = conn.execute(
+                f"UPDATE leads SET {sets}, updated_at = CURRENT_TIMESTAMP WHERE id = ?",  # nosec B608
                 vals,
             )
             conn.commit()
-        return True
+        return cur.rowcount > 0
 
     def get_stats(self) -> dict:
         with self._get_conn() as conn:

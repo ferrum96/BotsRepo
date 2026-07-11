@@ -79,9 +79,11 @@ async def main():
 
     runner = web.AppRunner(app)
     await runner.setup()
-    site = web.TCPSite(runner, "0.0.0.0", config.file_server_port)
+    site = web.TCPSite(runner, config.file_server_host, config.file_server_port)
     await site.start()
-    logger.info(f"✅ Файловый сервер запущен на порту {config.file_server_port}")
+    logger.info(
+        f"✅ Файловый сервер запущен на {config.file_server_host}:{config.file_server_port}"
+    )
 
     logger.info("Запуск бота...")
     await dp.start_polling(bot)

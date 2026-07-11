@@ -4,3 +4,6 @@ aiohttp-socks
 python-dotenv
 fastapi
 uvicorn
+pytest
+httpx
+bandit
