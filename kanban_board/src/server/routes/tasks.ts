@@ -33,6 +33,7 @@ app.post('/:boardId/tasks', async (c) => {
     priority: body.priority || 'MEDIUM',
     assignee: body.assignee || null,
     estimatedTime: body.estimatedTime || null,
+    meta: body.meta || '{}',
     position: (maxPosition?.position ?? -1) + 1,
     createdAt: now,
     updatedAt: now,

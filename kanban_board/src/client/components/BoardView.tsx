@@ -1,5 +1,6 @@
 import { useState, useMemo, useRef, useEffect, useLayoutEffect, useCallback } from 'react'
 import { DragDropContext, DropResult, DragStart, DragUpdate } from '@hello-pangea/dnd'
+import { useNavigate } from 'react-router-dom'
 import { BoardWithDetails, TaskWithDetails, CreateTaskInput, TaskFilters } from '@/lib/types'
 import { reorderTasksInBoard } from '@/lib/kanban-utils'
 import { KanbanColumn } from './KanbanColumn'
@@ -18,6 +19,22 @@ type BoardViewProps = {
   onRefresh: () => void
 }
 
+function readStorage(key: string) {
+  try {
+    return localStorage.getItem(key)
+  } catch {
+    return null
+  }
+}
+
+function writeStorage(key: string, value: string) {
+  try {
+    localStorage.setItem(key, value)
+  } catch {
+    // Ignore Safari private mode storage errors.
+  }
+}
+
 export function BoardView({
   board,
   onMoveTask,
@@ -28,16 +45,22 @@ export function BoardView({
   onCreateLabel: _onCreateLabel,
   onRefresh: _onRefresh,
 }: BoardViewProps) {
+  const navigate = useNavigate()
   const [selectedTask, setSelectedTask] = useState<TaskWithDetails | null>(null)
   const [showTaskModal, setShowTaskModal] = useState(false)
   const [showEpicModal, setShowEpicModal] = useState(false)
   const [taskColumnId, setTaskColumnId] = useState('')
   const [filters, setFilters] = useState<TaskFilters>(() => {
-    const saved = localStorage.getItem(`kanban-filters-${board.id}`)
-    return saved ? JSON.parse(saved) : {}
+    const saved = readStorage(`kanban-filters-${board.id}`)
+    if (!saved) return {}
+    try {
+      return JSON.parse(saved)
+    } catch {
+      return {}
+    }
   })
   const [activeColumnIndex, setActiveColumnIndex] = useState(() => {
-    const saved = localStorage.getItem(`kanban-column-${board.id}`)
+    const saved = readStorage(`kanban-column-${board.id}`)
     return saved ? parseInt(saved, 10) : 0
   })
   const [isMobile, setIsMobile] = useState(false)
@@ -123,11 +146,11 @@ export function BoardView({
   }, [board])
 
   useEffect(() => {
-    localStorage.setItem(`kanban-filters-${board.id}`, JSON.stringify(filters))
+    writeStorage(`kanban-filters-${board.id}`, JSON.stringify(filters))
   }, [filters, board.id])
 
   useEffect(() => {
-    localStorage.setItem(`kanban-column-${board.id}`, String(activeColumnIndex))
+    writeStorage(`kanban-column-${board.id}`, String(activeColumnIndex))
   }, [activeColumnIndex, board.id])
 
   const goToColumn = useCallback((index: number) => {
@@ -260,9 +283,7 @@ export function BoardView({
   }
 
   const handleTaskClick = (task: TaskWithDetails) => {
-    setSelectedTask(task)
-    setTaskColumnId(task.columnId)
-    setShowTaskModal(true)
+    navigate(`/boards/${displayBoard.id}/tasks/${task.id}`)
   }
 
   const handleSaveTask = async (data: CreateTaskInput) => {

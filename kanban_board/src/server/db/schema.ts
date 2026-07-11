@@ -54,6 +54,7 @@ export const tasks = sqliteTable('tasks', {
   priority: text('priority').notNull().default('MEDIUM'),
   assignee: text('assignee'),
   estimatedTime: text('estimatedTime'),
+  meta: text('meta').notNull().default('{}'),
   position: integer('position').notNull(),
   createdAt: integer('createdAt', { mode: 'timestamp' }).notNull(),
   updatedAt: integer('updatedAt', { mode: 'timestamp' }).notNull(),

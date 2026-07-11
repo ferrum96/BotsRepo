@@ -18,9 +18,25 @@ type SidebarProps = {
 
 const SIDEBAR_KEY = 'kanban-sidebar-collapsed'
 
+function readStorage(key: string) {
+  try {
+    return localStorage.getItem(key)
+  } catch {
+    return null
+  }
+}
+
+function writeStorage(key: string, value: string) {
+  try {
+    localStorage.setItem(key, value)
+  } catch {
+    // Ignore Safari private mode storage errors.
+  }
+}
+
 export function Sidebar({ boards, selectedBoardId, onSelectBoard, onBoardCreated }: SidebarProps) {
   const [collapsed, setCollapsed] = useState(() => {
-    return localStorage.getItem(SIDEBAR_KEY) === 'true'
+    return readStorage(SIDEBAR_KEY) === 'true'
   })
   const [showCreateModal, setShowCreateModal] = useState(false)
   const [mobileOpen, setMobileOpen] = useState(false)
@@ -31,7 +47,7 @@ export function Sidebar({ boards, selectedBoardId, onSelectBoard, onBoardCreated
   const handleToggle = () => {
     const next = !collapsed
     setCollapsed(next)
-    localStorage.setItem(SIDEBAR_KEY, String(next))
+    writeStorage(SIDEBAR_KEY, String(next))
   }
 
   useEffect(() => {
