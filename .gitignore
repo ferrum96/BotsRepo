@@ -66,3 +66,6 @@ service-account*.json
 # Misc
 .vercel
 nginx-local.conf
+
+# Deploy secrets
+deploy/webhook.env
