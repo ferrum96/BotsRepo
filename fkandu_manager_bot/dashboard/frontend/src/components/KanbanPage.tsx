@@ -226,7 +226,7 @@ export function KanbanPage({ leads, onRefresh, setPage, onOpenLead }: KanbanPage
       <div
         ref={scrollRef}
         className={`flex gap-3 md:gap-4 overflow-x-auto pb-4 kanban-touch flex-1 min-h-0 ${isMobile ? 'kanban-slider' : ''}`}
-        style={isMobile ? undefined : { WebkitOverflowScrolling: 'touch' }}
+        style={isMobile ? { WebkitOverflowScrolling: 'touch' } : undefined}
         onDragOver={(e) => {
           const el = scrollRef.current;
           if (!el) return;

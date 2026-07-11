@@ -10,6 +10,7 @@ services:
     volumes:
       - ./dashboard/frontend/src:/app/src
       - ./dashboard/frontend/public:/app/public
+      - ./dashboard/frontend/next.config.ts:/app/next.config.ts
     environment:
       - NODE_ENV=development
       - PORT=3000

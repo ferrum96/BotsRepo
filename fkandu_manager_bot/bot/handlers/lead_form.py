@@ -1,6 +1,7 @@
 """Lead form handler for collecting product information."""
 
 import logging
+from html import escape
 
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery
@@ -49,6 +50,12 @@ def get_file_url(config: Config, file_id: int) -> str:
     return f"http://{config.hostname}:{config.file_server_port}/files/{file_id}"
 
 
+def _format_admin_contact_line(username: str | None) -> str:
+    if username:
+        return f'💬 <a href="https://t.me/{username}">Написать в ЛС</a>'
+    return "💬 username не указан"
+
+
 @router.message(F.text == "/start")
 async def cmd_start(message: Message, state: FSMContext):
     await state.clear()
@@ -88,9 +95,10 @@ async def process_product_description(message: Message, state: FSMContext):
     if not text:
         await message.answer("Отправьте текстовое описание товара")
         return
-    await state.update_data(product_description=text)
+    safe_text = escape(text)
+    await state.update_data(product_description=safe_text)
     await message.answer(
-        f"✅ Описание принято:\n\n<i>{text}</i>\n\n"
+        f"✅ Описание принято:\n\n<i>{safe_text}</i>\n\n"
         "Также можно прикрепить файлы или перейти дальше:",
         reply_markup=AFTER_DESC_KB,
         parse_mode="HTML",
@@ -149,9 +157,9 @@ async def process_product_files(message: Message, state: FSMContext, config: Con
 
         file_id = db.save_file(file_content, doc_name, mime)
         file_url = get_file_url(config, file_id)
-        part = f'<a href="{file_url}">📎 {doc_name}</a>'
+        part = f'<a href="{file_url}">📎 {escape(doc_name)}</a>'
         if caption:
-            part += f"\n{caption}"
+            part += f"\n{escape(caption)}"
     elif message.photo:
         photo = message.photo[-1]
         file_info = await bot.get_file(photo.file_id)
@@ -164,7 +172,7 @@ async def process_product_files(message: Message, state: FSMContext, config: Con
         caption = message.caption or ""
         part = f'<a href="{file_url}">🖼 Фото</a>'
         if caption:
-            part += f"\n{caption}"
+            part += f"\n{escape(caption)}"
     else:
         await message.answer("Отправьте документ или фото")
         return
@@ -295,15 +303,19 @@ async def process_timeline(
     await state.clear()
 
     admin_product = product_info
+    safe_full_name = escape(user.full_name)
+    safe_category = escape(data["category"])
+    safe_budget = escape(data["budget"])
+    safe_timeline = escape(timeline_text)
     admin_msg = (
         f"<b>НОВАЯ ЗАЯВКА НА РЕКЛАМУ</b>\n\n"
-        f"👤 <b>От:</b> {user.full_name} ({f'@{user.username}' if user.username else 'нет username'})\n"
-        f"📦 <b>Категория:</b> {data['category']}\n\n"
+        f"👤 <b>От:</b> {safe_full_name} ({f'@{user.username}' if user.username else 'нет username'})\n"
+        f"📦 <b>Категория:</b> {safe_category}\n\n"
         f"📝 <b>О товаре:</b>\n{admin_product}\n\n"
-        f"💰 <b>Бюджет:</b> {data['budget']}\n"
-        f"📅 <b>Сроки:</b> {timeline_text}\n\n"
+        f"💰 <b>Бюджет:</b> {safe_budget}\n"
+        f"📅 <b>Сроки:</b> {safe_timeline}\n\n"
         f"📊 <b>Оценка:</b> {score}\n\n"
-        f'💬 <a href="https://t.me/{user.username}">Написать в ЛС</a>\n'
+        f"{_format_admin_contact_line(user.username)}\n"
         f'📊 <a href="http://{config.hostname}">Открыть дашборд</a>'
     )
     try:

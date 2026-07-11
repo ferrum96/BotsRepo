@@ -88,3 +88,5 @@ npm run dev
 | `BOT_TOKEN` | Токен бота от @BotFather |
 | `ADMIN_ID` | Telegram ID администратора |
 | `HOSTNAME` | IP-адрес сервера (для файлового сервера) |
+| `FILE_SERVER_HOST` | Host bind файлового сервера (по умолчанию авто: `0.0.0.0` в Docker, иначе `127.0.0.1`) |
+| `API_BIND_HOST` | Host bind для API при запуске через `python api.py` (по умолчанию авто: `0.0.0.0` в Docker, иначе `127.0.0.1`) |

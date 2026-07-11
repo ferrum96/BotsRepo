@@ -42,10 +42,11 @@ export function KanbanCard({ lead, onTouchStart, setPage, onOpenLead }: KanbanCa
     <div
       draggable
       onDragStart={(e) => {
+        const target = e.currentTarget;
         e.dataTransfer.setData('text/plain', String(lead.id));
         e.dataTransfer.effectAllowed = 'move';
         setTimeout(() => {
-          e.currentTarget.classList.add('dragging');
+          target?.classList.add('dragging');
         }, 0);
       }}
       onDragEnd={(e) => {
