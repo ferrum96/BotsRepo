@@ -17,6 +17,7 @@ from telegram.ext import (
 
 from bot import messages as msg
 from bot.database import Database, SurveyProgress
+from bot.handlers.admin import ban_user_in_group
 from bot.keyboards import (
     activity_keyboard,
     age_keyboard,
@@ -104,6 +105,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     attempts = await db.get_attempts(user.id)
     if attempts >= config.max_survey_attempts:
         await db.add_to_blacklist(user.id, "survey_attempts_exhausted")
+        await ban_user_in_group(context.bot, config, user.id, permanent=True)
         await update.message.reply_text(msg.ATTEMPTS_EXHAUSTED)
         return ConversationHandler.END
 
@@ -174,6 +176,8 @@ async def _record_failed_attempt(
 
     if remaining <= 0:
         await db.add_to_blacklist(user_id, "survey_failed")
+        # Ban in Telegram so invite links from the bot cannot be used to rejoin.
+        await ban_user_in_group(context.bot, config, user_id, permanent=True)
         return {"blacklisted": True, "remaining": 0}
 
     return {"blacklisted": False, "remaining": remaining}

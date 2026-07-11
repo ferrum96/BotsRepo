@@ -21,6 +21,8 @@ logger = logging.getLogger(__name__)
 
 OP_GG_PROFILE_URL = "https://op.gg/ru/pubg/user/{game_nick}"
 INACTIVE_AFTER_HOURS = 7 * 24
+# Do not judge inactivity until the member has been in the group this long.
+JOIN_ACTIVITY_GRACE_HOURS = INACTIVE_AFTER_HOURS
 _LAST_MATCH_PATTERN = re.compile(
     r'<div[^>]*(?:class="[^"]*matches-item__reload-time[^"]*"[^>]*data-ago-date="([^"]+)"|'
     r'data-ago-date="([^"]+)"[^>]*class="[^"]*matches-item__reload-time[^"]*")[^>]*>',
@@ -55,8 +57,32 @@ def _parse_db_datetime(value: Optional[str]) -> Optional[datetime]:
         return None
 
 
+def _parse_join_datetime(value: Optional[str]) -> Optional[datetime]:
+    """Parse group_members.joined_at (ISO) or LAST_MATCH_FORMAT fallback."""
+    if not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return _parse_db_datetime(value)
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
 def _is_inactive(last_match_at: datetime, now_utc: datetime) -> bool:
     return last_match_at <= (now_utc - timedelta(hours=INACTIVE_AFTER_HOURS))
+
+
+def _is_within_join_grace(
+    joined_at: Optional[datetime],
+    now_utc: datetime,
+    grace_hours: int = JOIN_ACTIVITY_GRACE_HOURS,
+) -> bool:
+    """True if the member joined the group recently and should skip inactivity checks."""
+    if joined_at is None:
+        return False
+    return joined_at > (now_utc - timedelta(hours=grace_hours))
 
 
 async def fetch_last_match_at(game_nick: str, client: httpx.AsyncClient) -> Optional[datetime]:
@@ -75,15 +101,45 @@ async def refresh_member_activity(
     member: Member,
     client: httpx.AsyncClient,
     now_utc: Optional[datetime] = None,
+    joined_at: Optional[str] = None,
+    *,
+    ignore_join_grace: bool = False,
 ) -> dict[str, bool]:
     now_utc = now_utc or datetime.now(timezone.utc)
     if not member.game_nick:
         await db.set_member_inactive(member.user_id, False)
-        return {"checked": False, "inactive_changed_to_true": False}
+        return {
+            "checked": False,
+            "inactive_changed_to_true": False,
+            "skipped_join_grace": False,
+        }
+
+    if not ignore_join_grace:
+        join_raw = joined_at
+        if join_raw is None:
+            join_raw = await db.get_group_member_join_date(member.user_id)
+        join_dt = _parse_join_datetime(join_raw)
+        if _is_within_join_grace(join_dt, now_utc):
+            # Periodic jobs skip fresh joiners; first-join path uses ignore_join_grace.
+            # Do not touch is_inactive — join-time check may have already set it.
+            logger.debug(
+                "Skip activity check for user_id=%s: within %sh join grace",
+                member.user_id,
+                JOIN_ACTIVITY_GRACE_HOURS,
+            )
+            return {
+                "checked": False,
+                "inactive_changed_to_true": False,
+                "skipped_join_grace": True,
+            }
 
     parsed_last_match = await fetch_last_match_at(member.game_nick, client)
     if parsed_last_match is None:
-        return {"checked": False, "inactive_changed_to_true": False}
+        return {
+            "checked": False,
+            "inactive_changed_to_true": False,
+            "skipped_join_grace": False,
+        }
 
     last_match_at_db = _as_db_string(parsed_last_match)
     is_inactive_now = _is_inactive(parsed_last_match, now_utc)
@@ -92,7 +148,59 @@ async def refresh_member_activity(
     return {
         "checked": True,
         "inactive_changed_to_true": (not member.is_inactive) and is_inactive_now,
+        "skipped_join_grace": False,
     }
+
+
+async def check_activity_on_join(
+    bot: "Bot",
+    db: Database,
+    config: "Config",
+    member: Member,
+) -> dict[str, bool]:
+    """Run OP.GG activity check immediately when a member first joins the group."""
+    try:
+        async with httpx.AsyncClient() as client:
+            result = await refresh_member_activity(
+                db=db,
+                member=member,
+                client=client,
+                ignore_join_grace=True,
+            )
+    except Exception:
+        logger.exception(
+            "Failed join activity check for user_id=%s nick=%s",
+            member.user_id,
+            member.game_nick,
+        )
+        return {
+            "checked": False,
+            "inactive_changed_to_true": False,
+            "skipped_join_grace": False,
+        }
+
+    updated = await db.get_member(member.user_id)
+    if (
+        updated
+        and updated.is_inactive
+        and result.get("inactive_changed_to_true")
+    ):
+        await notify_admins_about_inactive(
+            bot=bot,
+            config=config,
+            member=updated,
+            last_match_at=updated.last_match_at,
+        )
+
+    logger.info(
+        "Join activity check user_id=%s nick=%s checked=%s inactive=%s",
+        member.user_id,
+        member.game_nick,
+        result.get("checked"),
+        bool(updated and updated.is_inactive),
+    )
+    return result
+
 
 
 async def notify_admins_about_inactive(
@@ -130,6 +238,7 @@ async def refresh_group_activity(
     checked = 0
     inactive = 0
     added_to_inactive = 0
+    skipped_join_grace = 0
     errors = 0
     now_utc = datetime.now(timezone.utc)
 
@@ -139,14 +248,18 @@ async def refresh_group_activity(
             if not member:
                 continue
             try:
+                join_raw = await db.get_group_member_join_date(user_id)
                 result = await refresh_member_activity(
                     db=db,
                     member=member,
                     client=client,
                     now_utc=now_utc,
+                    joined_at=join_raw,
                 )
                 if result["checked"]:
                     checked += 1
+                if result.get("skipped_join_grace"):
+                    skipped_join_grace += 1
 
                 updated_member = await db.get_member(member.user_id)
                 if updated_member and updated_member.is_inactive:
@@ -172,5 +285,6 @@ async def refresh_group_activity(
         "checked": checked,
         "inactive": inactive,
         "added_to_inactive": added_to_inactive,
+        "skipped_join_grace": skipped_join_grace,
         "errors": errors,
     }

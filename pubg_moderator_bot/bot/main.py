@@ -34,6 +34,7 @@ from bot.handlers.admin import (
     cmd_sync_group,
     cmd_stats,
     cmd_unblacklist,
+    enforce_blacklist_telegram_bans,
     on_chat_join_request,
     on_group_membership_message_event,
     on_chat_member_update,
@@ -69,13 +70,25 @@ async def post_init(application: Application) -> None:
         result["errors"],
     )
 
+    # Blacklisted users must stay Telegram-banned so invite links cannot rejoin.
+    ban_result = await enforce_blacklist_telegram_bans(application.bot, db, config)
+    logger.info(
+        "Blacklist Telegram bans enforced: total=%s newly_banned=%s skipped=%s errors=%s",
+        ban_result["total"],
+        ban_result["banned"],
+        ban_result["skipped"],
+        ban_result["errors"],
+    )
+
     activity_result = await refresh_group_activity(application.bot, db, config)
     logger.info(
-        "Initial activity refresh: group_total=%s checked=%s inactive=%s added=%s errors=%s",
+        "Initial activity refresh: group_total=%s checked=%s inactive=%s added=%s "
+        "skipped_join_grace=%s errors=%s",
         activity_result["group_total"],
         activity_result["checked"],
         activity_result["inactive"],
         activity_result["added_to_inactive"],
+        activity_result["skipped_join_grace"],
         activity_result["errors"],
     )
 
@@ -124,11 +137,13 @@ async def _refresh_activity_job(context) -> None:
     config: Config = context.application.bot_data["config"]
     result = await refresh_group_activity(context.bot, db, config)
     logger.info(
-        "Periodic activity refresh: group_total=%s checked=%s inactive=%s added=%s errors=%s",
+        "Periodic activity refresh: group_total=%s checked=%s inactive=%s added=%s "
+        "skipped_join_grace=%s errors=%s",
         result["group_total"],
         result["checked"],
         result["inactive"],
         result["added_to_inactive"],
+        result["skipped_join_grace"],
         result["errors"],
     )
 

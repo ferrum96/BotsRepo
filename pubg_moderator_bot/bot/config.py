@@ -44,6 +44,7 @@ class Config:
             telegram_group_link=os.getenv("TELEGRAM_GROUP_LINK", ""),
             discord_link=os.getenv("DISCORD_LINK", ""),
             database_path=os.getenv("DATABASE_PATH", "data/bot.db"),
+            max_survey_attempts=int(os.getenv("MAX_SURVEY_ATTEMPTS", "2")),
             dashboard_port=int(os.getenv("DASHBOARD_PORT", "8080")),
             dashboard_api_key=os.getenv("DASHBOARD_API_KEY", ""),
             group_sync_interval_minutes=int(

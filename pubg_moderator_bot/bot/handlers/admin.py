@@ -10,6 +10,7 @@ from telegram.constants import ChatMemberStatus, ParseMode
 from telegram.error import BadRequest, Forbidden, TelegramError
 from telegram.ext import ContextTypes
 
+from bot.activity_monitor import check_activity_on_join
 from bot import messages as msg
 from bot.database import Database
 from bot.group_titles import assign_game_nick_title, remove_from_group_header
@@ -29,6 +30,9 @@ _REMOVED_STATUSES = {
     ChatMemberStatus.LEFT,
     ChatMemberStatus.BANNED,
 }
+# Soft kick = ban+unban. Ignore the transient BANNED update so we don't
+# accidentally blacklist people who only failed the survey gate.
+_soft_kick_user_ids: set[int] = set()
 
 
 def _normalize_game_nick(value: str) -> str:
@@ -126,8 +130,18 @@ async def sync_group_members_state(
             perspective=progress.perspective or "Mixed",
         )
         await db.track_group_member(user.id)
+        await db.clear_progress(user.id)
         known_member_ids.add(user.id)
         imported += 1
+        member = await db.get_member(user.id)
+        if member and member.game_nick and not config.is_admin(user.id):
+            await assign_game_nick_title(
+                bot,
+                config.group_id,
+                user.id,
+                member.game_nick,
+            )
+            await check_activity_on_join(bot, db, config, member)
 
     members = await db.get_all_members()
     admin_ids = set(config.admin_ids)
@@ -151,6 +165,8 @@ async def sync_group_members_state(
             if (
                 chat_member.status == ChatMemberStatus.BANNED
                 and member.user_id not in admin_ids
+                and member.user_id not in _soft_kick_user_ids
+                and not await db.is_blacklisted(member.user_id)
             ):
                 await db.add_to_blacklist(member.user_id, "removed_from_group")
                 blacklisted += 1
@@ -246,13 +262,52 @@ async def _promote_from_completed_survey(db: Database, user) -> bool:
     return True
 
 
-async def _kick_unvetted_member(
+async def enforce_blacklist_telegram_bans(
+    bot: Bot,
+    db: Database,
+    config: "Config",
+) -> dict[str, int]:
+    """Ensure every blacklisted user is banned in Telegram (blocks invite rejoins)."""
+    banned = 0
+    skipped = 0
+    errors = 0
+    entries = await db.get_blacklist()
+    for user_id, _reason, _created_at in entries:
+        if config.is_admin(user_id):
+            skipped += 1
+            continue
+        try:
+            chat_member = await bot.get_chat_member(config.group_id, user_id)
+            if chat_member.status == ChatMemberStatus.BANNED:
+                skipped += 1
+                continue
+        except (BadRequest, Forbidden, TelegramError):
+            # User may be unknown to the chat; still attempt a ban.
+            logger.debug(
+                "getChatMember failed for blacklist user %s; attempting ban",
+                user_id,
+                exc_info=True,
+            )
+
+        if await ban_user_in_group(bot, config, user_id, permanent=True):
+            banned += 1
+            await db.untrack_group_member(user_id)
+        else:
+            errors += 1
+
+    return {"total": len(entries), "banned": banned, "skipped": skipped, "errors": errors}
+
+
+async def ban_user_in_group(
     bot: Bot,
     config: "Config",
-    db: Database,
     user_id: int,
-) -> None:
-    """Remove a user who joined without passing the survey gate."""
+    *,
+    permanent: bool = True,
+) -> bool:
+    """Ban user in the clan group. permanent=True blocks rejoin via invite links."""
+    if not permanent:
+        _soft_kick_user_ids.add(user_id)
     try:
         await remove_from_group_header(
             bot_token=config.bot_token,
@@ -261,9 +316,55 @@ async def _kick_unvetted_member(
             bot=bot,
         )
         await bot.ban_chat_member(config.group_id, user_id)
-        await bot.unban_chat_member(config.group_id, user_id)
     except (BadRequest, Forbidden, TelegramError):
-        logger.exception("Failed to kick unvetted user %s", user_id)
+        if not permanent:
+            _soft_kick_user_ids.discard(user_id)
+        logger.exception(
+            "Failed to ban user %s in group (permanent=%s)",
+            user_id,
+            permanent,
+        )
+        return False
+
+    if not permanent:
+        try:
+            await bot.unban_chat_member(config.group_id, user_id)
+        except (BadRequest, Forbidden, TelegramError):
+            # Keep soft-kick marker: user may still look BANNED; leave handler
+            # must not treat that as an admin ban and blacklist them.
+            logger.exception(
+                "Soft kick ban ok but unban failed for user %s; "
+                "keeping soft-kick marker",
+                user_id,
+            )
+            return False
+    return True
+
+
+async def _reject_unauthorized_join(
+    bot: Bot,
+    config: "Config",
+    db: Database,
+    user_id: int,
+) -> None:
+    """Remove unauthorized joiner. Blacklisted users get a hard ban (no rejoin)."""
+    if await db.is_blacklisted(user_id):
+        await ban_user_in_group(bot, config, user_id, permanent=True)
+        logger.info("Hard-banned blacklisted user %s (rejoin blocked)", user_id)
+        await db.untrack_group_member(user_id)
+        return
+
+    # Another handler/sync may have just saved this clan member — never soft-kick them
+    # (soft kick demotes and clears the game_nick custom title).
+    if await db.is_member(user_id):
+        logger.info(
+            "Skip unauthorized-join reject for clan member %s",
+            user_id,
+        )
+        return
+
+    await ban_user_in_group(bot, config, user_id, permanent=False)
+    logger.info("Soft-kicked unvetted user %s (can rejoin after survey)", user_id)
     await db.untrack_group_member(user_id)
 
 
@@ -280,8 +381,10 @@ async def _handle_vetted_group_join(
         await _refresh_member_tg_profile(db, user)
     else:
         promoted = await _promote_from_completed_survey(db, user)
-        if not promoted:
-            await _kick_unvetted_member(bot, config, db, user.id)
+        if not promoted and not await db.is_member(user.id):
+            # Re-check membership: concurrent sync may have imported this user
+            # and cleared survey progress while we were handling the join.
+            await _reject_unauthorized_join(bot, config, db, user.id)
             return
 
     member = await db.get_member(user.id)
@@ -292,6 +395,7 @@ async def _handle_vetted_group_join(
             user.id,
             member.game_nick,
         )
+        await check_activity_on_join(bot, db, config, member)
 
 
 async def cmd_members(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -414,11 +518,25 @@ async def cmd_unblacklist(
             await update.message.reply_text("User ID должен быть числом.")
         return
 
-    removed = await _get_db(context).remove_from_blacklist(user_id)
+    db = _get_db(context)
+    config = _get_config(context)
+    removed = await db.remove_from_blacklist(user_id)
     if update.message:
         if removed:
+            try:
+                await context.bot.unban_chat_member(
+                    config.group_id,
+                    user_id,
+                    only_if_banned=True,
+                )
+            except (BadRequest, Forbidden, TelegramError):
+                logger.exception(
+                    "Failed to unban user %s after /unblacklist",
+                    user_id,
+                )
             await update.message.reply_text(
-                f"Пользователь {user_id} удалён из чёрного списка."
+                f"Пользователь {user_id} удалён из чёрного списка "
+                f"(Telegram-бан снят, если был)."
             )
         else:
             await update.message.reply_text(
@@ -464,14 +582,11 @@ async def cmd_kick_non_members(
             continue
 
         try:
-            await remove_from_group_header(
-                bot_token=config.bot_token,
-                chat_id=config.group_id,
-                user_id=user_id,
-                bot=bot,
-            )
-            await bot.ban_chat_member(config.group_id, user_id)
-            await bot.unban_chat_member(config.group_id, user_id)
+            # Hard ban: blacklist must block invite-link rejoins.
+            banned = await ban_user_in_group(bot, config, user_id, permanent=True)
+            if not banned:
+                errors += 1
+                continue
             await db.add_to_blacklist(user_id, "not_in_clan_kicked")
             await db.untrack_group_member(user_id)
             kicked += 1
@@ -656,10 +771,11 @@ async def on_chat_member_update(
     if new_status in joined_statuses and old_status not in joined_statuses:
         if not await _may_enter_group(db, config, user.id):
             logger.info(
-                "Rejecting unvetted join for user %s (no completed survey/membership)",
+                "Rejecting unauthorized join for user %s "
+                "(blacklist/unvetted)",
                 user.id,
             )
-            await _kick_unvetted_member(context.bot, config, db, user.id)
+            await _reject_unauthorized_join(context.bot, config, db, user.id)
             return
 
         await _handle_vetted_group_join(context.bot, config, db, user)
@@ -678,13 +794,29 @@ async def on_chat_member_update(
     if was_member and new_status in removed_statuses:
         await db.untrack_group_member(user.id)
         if config.is_admin(user.id):
+            _soft_kick_user_ids.discard(user.id)
             return
-        if new_status == ChatMemberStatus.BANNED:
-            await db.add_to_blacklist(user.id, "removed_from_group")
-            logger.info("User %s blacklisted after group ban/kick", user.id)
+
+        # Soft kick uses ban+unban; ignore that transient BANNED event.
+        soft_kicked = user.id in _soft_kick_user_ids
+        if soft_kicked:
+            logger.info(
+                "User %s removed by soft kick gate; blacklist skipped",
+                user.id,
+            )
+        elif new_status == ChatMemberStatus.BANNED:
+            # Keep original blacklist reason if already listed (e.g. survey_failed).
+            if not await db.is_blacklisted(user.id):
+                await db.add_to_blacklist(user.id, "removed_from_group")
+                logger.info("User %s blacklisted after group ban/kick", user.id)
         else:
             logger.info("User %s left group voluntarily, blacklist skipped", user.id)
+
+        # Keep soft-kick marker through sync so a concurrent BANNED status
+        # cannot be misclassified as an admin ban.
         sync_result = await sync_group_members_state(context.bot, db, config)
+        if soft_kicked:
+            _soft_kick_user_ids.discard(user.id)
         logger.info(
             "Event sync after leave user=%s: total=%s present=%s missing=%s blacklisted=%s errors=%s",
             user.id,
@@ -711,7 +843,9 @@ async def on_group_membership_message_event(
     changed = False
 
     if update.message.left_chat_member and not update.message.left_chat_member.is_bot:
-        await db.untrack_group_member(update.message.left_chat_member.id)
+        left_id = update.message.left_chat_member.id
+        await db.untrack_group_member(left_id)
+        _soft_kick_user_ids.discard(left_id)
         changed = True
 
     if update.message.new_chat_members:
@@ -720,10 +854,10 @@ async def on_group_membership_message_event(
                 continue
             if not await _may_enter_group(db, config, user.id):
                 logger.info(
-                    "Rejecting unvetted fallback join for user %s",
+                    "Rejecting unauthorized fallback join for user %s",
                     user.id,
                 )
-                await _kick_unvetted_member(context.bot, config, db, user.id)
+                await _reject_unauthorized_join(context.bot, config, db, user.id)
                 changed = True
                 continue
             await _handle_vetted_group_join(context.bot, config, db, user)
@@ -761,7 +895,7 @@ async def on_chat_join_request(
 
     db = _get_db(context)
     if await db.is_blacklisted(user.id):
-        logger.info("Join request from blacklisted user %s ignored", user.id)
+        logger.info("Join request from blacklisted user %s declined+banned", user.id)
         try:
             await context.bot.decline_chat_join_request(
                 chat_id=config.group_id,
@@ -772,6 +906,8 @@ async def on_chat_join_request(
                 "Failed to decline join request for blacklisted user %s",
                 user.id,
             )
+        # Also hard-ban so open invite links cannot be used later.
+        await ban_user_in_group(context.bot, config, user.id, permanent=True)
         return
 
     if not await _may_enter_group(db, config, user.id):
