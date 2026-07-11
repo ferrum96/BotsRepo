@@ -518,8 +518,8 @@ export function TaskDetailsPage({
   }
 
   return (
-    <div className="flex-1 overflow-y-auto bg-gray-50 p-3 sm:p-4 md:p-6">
-      <div className="mx-auto max-w-6xl">
+    <div className="flex-1 min-h-full overflow-y-auto bg-gray-50 p-3 sm:p-4 md:p-6">
+      <div className="mx-auto flex min-h-full max-w-6xl flex-col">
         <div className="mb-3 flex justify-end sm:mb-4 sm:justify-start">
           <button
             type="button"
@@ -531,8 +531,8 @@ export function TaskDetailsPage({
           </button>
         </div>
 
-        <div className="grid gap-3 sm:gap-4 lg:grid-cols-[1fr_300px]">
-          <section className="order-2 space-y-4 rounded-xl border border-gray-200 bg-white p-3 sm:p-4 md:p-6 lg:order-1">
+        <div className="grid flex-1 gap-3 sm:gap-4 lg:grid-cols-[1fr_300px] lg:items-stretch">
+          <section className="order-2 h-full space-y-4 rounded-xl border border-gray-200 bg-white p-3 sm:p-4 md:p-6 lg:order-1">
             <div>
               <div className="mb-2 text-xs uppercase tracking-wide text-gray-400">
                 {formatTaskId(task.taskNumber)}
@@ -757,7 +757,7 @@ export function TaskDetailsPage({
             </div>
           </section>
 
-          <aside className="order-1 space-y-4 rounded-xl border border-gray-200 bg-white p-3 sm:p-4 lg:order-2">
+          <aside className="order-1 h-full space-y-4 rounded-xl border border-gray-200 bg-white p-3 sm:p-4 lg:order-2">
             <h2 className="text-sm font-semibold text-gray-700">Детали</h2>
 
             <div ref={detailsPanelRef} className="space-y-3 text-sm text-gray-600">
