@@ -126,13 +126,13 @@ export function Sidebar({ boards, selectedBoardId, onSelectBoard, onBoardCreated
           >
             Kanban Board
           </span>
-          <button
+          {/* <button
             type="button"
             onClick={handleToggle}
             className="p-2 hover:bg-gray-700 rounded hidden md:flex items-center justify-center flex-shrink-0"
           >
             {collapsed ? <ChevronRight size={20} /> : <ChevronLeft size={20} />}
-          </button>
+          </button> */}
           <button
             type="button"
             onClick={() => setMobileOpen(false)}
