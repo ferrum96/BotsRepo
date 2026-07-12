@@ -108,7 +108,10 @@ npm run db:add-user -- petrov 'NewPass!' "Петров Иван" --force
 
 | URL | Внутренний порт |
 |-----|----------------|
-| http://IP:448 | 127.0.0.1:3002 |
+| https://kanban-board.duckdns.org/ | 127.0.0.1:3002 |
+| https://fkandu.duckdns.org/kanban | 127.0.0.1:3002 (через gateway) |
+
+Legacy-доступ через host-nginx порт: `http://IP:448`.
 
 Сборка и деплой: [deploy/DEPLOY.md](../deploy/DEPLOY.md).
 

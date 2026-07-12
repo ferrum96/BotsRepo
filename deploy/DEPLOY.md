@@ -1,7 +1,7 @@
 # Деплой на VPS (systemd)
 
 > **Локальная разработка** — Docker: см. [DEV.md](../DEV.md)  
-> **Production на сервере** — systemd + nginx на хосте.
+> **Production на сервере** — systemd (сервисы) + nginx (legacy порты) + caddy (HTTPS).
 
 ## Содержимое `deploy/`
 
@@ -10,6 +10,7 @@ deploy/
 ├── deploy.sh              # основной скрипт деплоя
 ├── webhook.py             # GitHub webhook → автодеплой
 ├── ports.env              # карта портов production/dev
+├── domains.env.example    # переменные доменов для Caddy
 ├── webhook.env.example    # шаблон secret для webhook
 ├── nginx/
 │   └── nginx-systemd.conf # nginx для VPS (порты 444–449)
@@ -147,6 +148,95 @@ systemctl restart pubg-api
 | http://IP:447 | PUBG clan dashboard |
 | http://IP:448 | Kanban |
 | http://IP:449/ | GitHub deploy webhook (POST) |
+
+## HTTPS через DuckDNS + Caddy
+
+Скрипт настраивает общий HTTPS gateway для текущих сервисов и удобное добавление будущих.
+Режим рассчитан на **статический IP** (без duckdns updater-сервисов).
+
+Текущие целевые URL:
+- `https://fkandu.duckdns.org/dashboard`
+- `https://fkandu.duckdns.org/api`
+- `https://fkandu.duckdns.org/files`
+- `https://kanban-board.duckdns.org/`
+- `https://bb-clan.duckdns.org/`
+
+1. Убедитесь, что DNS уже указывает на ваш VPS (статический IP).
+2. (Опционально) задайте отдельные домены сервисов:
+
+```bash
+cp deploy/domains.env.example deploy/domains.env
+nano deploy/domains.env
+```
+
+3. На сервере из корня репозитория запустите:
+
+```bash
+./deploy/duckdns-caddy-setup.sh \
+  --gateway-domain YOUR_GATEWAY_DOMAIN \
+  --email you@example.com
+```
+
+Что делает скрипт:
+- настраивает `Caddy` как HTTPS gateway с path-based роутингом;
+- читает `deploy/domains.env` (если есть) и создает host-based домены сервисов;
+- создает базовые маршруты для текущих сервисов:
+  - `/kanban` -> `127.0.0.1:3002`
+  - `/dashboard` -> `127.0.0.1:3000`
+  - `/api` -> `127.0.0.1:8000`
+  - `/files` -> `127.0.0.1:8088`
+  - `/pubg` -> `127.0.0.1:8080`
+- открывает `80/443` в `ufw` (если не указан `--no-firewall`).
+
+Переменные доменов в `deploy/domains.env`:
+
+```bash
+GATEWAY_DOMAIN="fkandu.duckdns.org"
+SERVICE_DOMAIN_FKANDU="fkandu.duckdns.org"
+SERVICE_DOMAIN_KANBAN="kanban-board.duckdns.org"
+SERVICE_DOMAIN_FKANDU_API=""
+SERVICE_DOMAIN_FKANDU_FILES=""
+SERVICE_DOMAIN_BB_CLAN="bb-clan.duckdns.org"
+```
+
+Проверка:
+
+```bash
+systemctl status caddy --no-pager
+curl -I https://YOUR_GATEWAY_DOMAIN
+```
+
+### Добавление будущих сервисов
+
+После установки доступна команда `caddy-route`:
+
+```bash
+caddy-route add --name analytics --path /analytics --upstream 127.0.0.1:9100
+caddy-route list
+```
+
+Автовариант из `systemd` unit (порт определяется автоматически):
+
+```bash
+caddy-route add-from-unit --unit kanban --name kanban --path /kanban
+caddy-route add-from-unit --unit pubg-api --name pubg --path /pubg
+```
+
+Массовый импорт маршрутов из unit-файлов:
+
+```bash
+# Предпросмотр без изменений
+caddy-route sync --from /etc/systemd/system --prefix /svc --dry-run
+
+# Применить только для сервисов ботов/дашбордов
+caddy-route sync --from /etc/systemd/system --prefix /svc --include 'kanban|fkandu|pubg'
+```
+
+Удаление маршрута:
+
+```bash
+caddy-route remove --name analytics
+```
 
 ## Данные
 
