@@ -3,6 +3,7 @@ import { Download, Paperclip, Trash2 } from 'lucide-react'
 import { BoardWithDetails, CreateTaskInput, User } from '@/lib/types'
 import { api } from '@/lib/api'
 import { getPriorityBadgeColor, getPriorityLabel } from '@/lib/kanban-utils'
+import { safeRandomUUID } from '@/lib/uuid'
 import { RichTextEditor } from './RichTextEditor'
 
 type NewTaskPageProps = {
@@ -131,7 +132,7 @@ export function NewTaskPage({ board, onCancel, onCreateTask }: NewTaskPageProps)
   }, [estimatedTime])
 
   const storeRichImage = (input: { name: string; dataUrl: string }) => {
-    const id = crypto.randomUUID()
+    const id = safeRandomUUID()
     setMeta((prev) => ({
       ...prev,
       richImages: {
@@ -238,7 +239,7 @@ export function NewTaskPage({ board, onCancel, onCreateTask }: NewTaskPageProps)
               const reader = new FileReader()
               reader.onload = () => {
                 resolve({
-                  id: crypto.randomUUID(),
+                  id: safeRandomUUID(),
                   name: file.name,
                   type: file.type || 'application/octet-stream',
                   size: file.size,
@@ -275,7 +276,7 @@ export function NewTaskPage({ board, onCancel, onCreateTask }: NewTaskPageProps)
     }
 
     const entry: TaskTimeEntry = {
-      id: crypto.randomUUID(),
+      id: safeRandomUUID(),
       date: actualDateDraft,
       duration: check.normalized,
       minutes: check.totalMinutes,

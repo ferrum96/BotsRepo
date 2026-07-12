@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom'
 import { BoardWithDetails, TaskWithDetails, TaskFilters, User } from '@/lib/types'
 import { api } from '@/lib/api'
 import { reorderTasksInBoard } from '@/lib/kanban-utils'
+import { buildTaskPath } from '@/lib/routes'
 import { KanbanColumn } from './KanbanColumn'
 import { EpicModal } from './EpicModal'
 import { Filters } from './Filters'
@@ -272,11 +273,11 @@ export function BoardView({
   }
 
   const handleAddTask = () => {
-    navigate(`/boards/${displayBoard.id}/tasks/new`)
+    navigate(buildTaskPath(displayBoard, 'new'))
   }
 
   const handleTaskClick = (task: TaskWithDetails) => {
-    navigate(`/boards/${displayBoard.id}/tasks/${task.id}`)
+    navigate(buildTaskPath(displayBoard, task.taskNumber))
   }
 
   const currentColumn = displayBoard.columns[activeColumnIndex]

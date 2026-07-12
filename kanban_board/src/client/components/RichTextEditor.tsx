@@ -1,4 +1,5 @@
 import { ChangeEvent, ClipboardEvent, DragEvent, useEffect, useRef } from 'react'
+import { safeRandomUUID } from '@/lib/uuid'
 
 type RichTextEditorProps = {
   value: string
@@ -24,6 +25,18 @@ export function RichTextEditor({
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const valueRef = useRef(value)
 
+  const restoreCaretAfterChange = (
+    textarea: HTMLTextAreaElement,
+    cursor: number,
+    options: { stickToBottom: boolean; previousScrollTop: number }
+  ) => {
+    requestAnimationFrame(() => {
+      textarea.focus()
+      textarea.setSelectionRange(cursor, cursor)
+      textarea.scrollTop = options.stickToBottom ? textarea.scrollHeight : options.previousScrollTop
+    })
+  }
+
   useEffect(() => {
     valueRef.current = value
   }, [value])
@@ -35,14 +48,12 @@ export function RichTextEditor({
     const start = textarea.selectionStart
     const end = textarea.selectionEnd
     const current = valueRef.current
+    const previousScrollTop = textarea.scrollTop
+    const stickToBottom = end === current.length
     const next = `${current.slice(0, start)}${text}${current.slice(end)}`
     onChange(next)
 
-    requestAnimationFrame(() => {
-      textarea.focus()
-      const cursor = start + text.length
-      textarea.setSelectionRange(cursor, cursor)
-    })
+    restoreCaretAfterChange(textarea, start + text.length, { stickToBottom, previousScrollTop })
   }
 
   const insertImages = async (files: File[], forceInclude = false) => {
@@ -77,12 +88,13 @@ export function RichTextEditor({
 
     const wrap = (before: string, after = before) => {
       const content = selected || 'текст'
+      const previousScrollTop = textarea.scrollTop
+      const stickToBottom = end === current.length
       const next = `${current.slice(0, start)}${before}${content}${after}${current.slice(end)}`
       onChange(next)
-      requestAnimationFrame(() => {
-        textarea.focus()
-        const cursor = start + before.length + content.length + after.length
-        textarea.setSelectionRange(cursor, cursor)
+      restoreCaretAfterChange(textarea, start + before.length + content.length + after.length, {
+        stickToBottom,
+        previousScrollTop,
       })
     }
 
@@ -103,29 +115,31 @@ export function RichTextEditor({
 
     if (action === 'code') {
       const content = selected || "const value = 'code'"
+      const previousScrollTop = textarea.scrollTop
+      const stickToBottom = end === current.length
       const snippet = `\n\`\`\`\n${content}\n\`\`\`\n`
       const next = `${current.slice(0, start)}${snippet}${current.slice(end)}`
       onChange(next)
-      requestAnimationFrame(() => {
-        textarea.focus()
-        const cursor = start + snippet.length
-        textarea.setSelectionRange(cursor, cursor)
+      restoreCaretAfterChange(textarea, start + snippet.length, {
+        stickToBottom,
+        previousScrollTop,
       })
       return
     }
 
     if (action === 'list') {
       const content = selected || 'список 1\nсписок 2'
+      const previousScrollTop = textarea.scrollTop
+      const stickToBottom = end === current.length
       const listText = content
         .split('\n')
         .map((line) => (line.trim() ? `* ${line.replace(/^\*\s*/, '')}` : '* '))
         .join('\n')
       const next = `${current.slice(0, start)}${listText}${current.slice(end)}`
       onChange(next)
-      requestAnimationFrame(() => {
-        textarea.focus()
-        const cursor = start + listText.length
-        textarea.setSelectionRange(cursor, cursor)
+      restoreCaretAfterChange(textarea, start + listText.length, {
+        stickToBottom,
+        previousScrollTop,
       })
     }
   }
@@ -327,7 +341,15 @@ export function renderRichText(value?: string | null, options?: RichTextRenderOp
   return parts
     .map((part, index) => {
       if (index % 2 === 1) {
-        return `<pre class="rich-text-code"><code>${escapeHtml(part.trim())}</code></pre>`
+        const rawCode = part.trim()
+        const encodedCode = encodeURIComponent(rawCode)
+        const lineCount = rawCode.split('\n').length
+        const isLongCode = lineCount > 12 || rawCode.length > 700
+        const preClass = isLongCode
+          ? 'rich-text-code rich-text-code-collapsible'
+          : 'rich-text-code'
+        const toggleAttr = isLongCode ? ' data-toggle-code="true"' : ''
+        return `<div class="rich-text-code-wrapper"><button type="button" class="rich-text-copy-button" data-copy-code="${encodedCode}">Копировать</button><pre class="${preClass}"${toggleAttr}><code>${escapeHtml(rawCode)}</code></pre></div>`
       }
       return renderListBlock(part, options)
     })
@@ -444,7 +466,7 @@ function writeStoredImages(images: Record<string, StoredImage>) {
 }
 
 function saveStoredImage(input: { name: string; dataUrl: string }) {
-  const id = crypto.randomUUID()
+  const id = safeRandomUUID()
   const images = readStoredImages()
   images[id] = {
     id,

@@ -6,7 +6,8 @@ import { TaskDetailsPage } from './components/TaskDetailsPage'
 import { NewTaskPage } from './components/NewTaskPage'
 import { api } from './lib/api'
 import { useAuth } from './lib/auth'
-import { reorderTasksInBoard } from './lib/kanban-utils'
+import { formatTaskId, reorderTasksInBoard } from './lib/kanban-utils'
+import { buildBoardPath, looksLikeUuid, normalizeTaskRouteRef, resolveBoardIdFromRoute } from './lib/routes'
 import { Board, BoardWithDetails } from './lib/types'
 
 const STORAGE_KEY = 'kanban-selected-board'
@@ -29,7 +30,7 @@ function writeStorage(key: string, value: string) {
 
 export default function App() {
   const navigate = useNavigate()
-  const { boardId: routeBoardId, taskId } = useParams()
+  const { boardRef: routeBoardRef, taskRef } = useParams()
   const { user, logout } = useAuth()
   const [boards, setBoards] = useState<(Board & { _count: { tasks: number } })[]>([])
   const [selectedBoardId, setSelectedBoardId] = useState<string | null>(() => {
@@ -44,10 +45,19 @@ export default function App() {
   }
 
   useEffect(() => {
-    if (!routeBoardId) return
-    setSelectedBoardId(routeBoardId)
-    writeStorage(STORAGE_KEY, routeBoardId)
-  }, [routeBoardId])
+    if (!routeBoardRef) return
+    const resolvedBoardId = resolveBoardIdFromRoute(routeBoardRef, boards)
+    if (resolvedBoardId) {
+      setSelectedBoardId(resolvedBoardId)
+      writeStorage(STORAGE_KEY, resolvedBoardId)
+      return
+    }
+
+    if (looksLikeUuid(routeBoardRef)) {
+      setSelectedBoardId(routeBoardRef)
+      writeStorage(STORAGE_KEY, routeBoardRef)
+    }
+  }, [routeBoardRef, boards])
 
   const fetchBoards = useCallback(async () => {
     try {
@@ -89,7 +99,8 @@ export default function App() {
   const handleSelectBoard = (id: string) => {
     setSelectedBoardId(id)
     writeStorage(STORAGE_KEY, id)
-    navigate('/')
+    const selectedBoard = boards.find((board) => board.id === id)
+    navigate(selectedBoard ? buildBoardPath(selectedBoard) : '/')
   }
 
   const handleMoveTask = async (taskId: string, columnId: string, position: number) => {
@@ -136,23 +147,33 @@ export default function App() {
           <div className="flex items-center justify-center h-full">
             <div className="text-gray-500">Загрузка...</div>
           </div>
-        ) : taskId === 'new' && board ? (
+        ) : taskRef && normalizeTaskRouteRef(taskRef) === 'NEW' && board ? (
           <NewTaskPage
             board={board}
-            onCancel={() => navigate('/')}
+            onCancel={() => navigate(buildBoardPath(board))}
             onCreateTask={async (data) => {
               const task = await api.tasks.create(board.id, data)
               await fetchBoard()
               await fetchBoards()
-              navigate('/')
+              navigate(buildBoardPath(board))
               return task
             }}
           />
-        ) : taskId && board ? (
+        ) : taskRef && board ? (
           <TaskDetailsPage
             board={board}
-            taskId={taskId}
-            onBack={() => navigate('/')}
+            taskId={(() => {
+              const normalizedTaskRef = normalizeTaskRouteRef(taskRef)
+              const matchedTask = board.columns
+                .flatMap((column) => column.tasks)
+                .find((item) =>
+                  item.id === taskRef ||
+                  String(item.taskNumber) === normalizedTaskRef ||
+                  formatTaskId(item.taskNumber) === normalizedTaskRef
+                )
+              return matchedTask?.id ?? taskRef
+            })()}
+            onBack={() => navigate(buildBoardPath(board))}
             onUpdateTask={async (id, data) => {
               await api.tasks.update(id, data)
               // Avoid full board refetch for metadata-only updates (e.g. inline image insert),
