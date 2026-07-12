@@ -211,7 +211,22 @@ EOF
 
 echo "==> Installing packages"
 run apt update
-run apt install -y caddy curl dnsutils
+run apt install -y curl dnsutils ca-certificates gnupg debian-keyring debian-archive-keyring apt-transport-https
+
+install_caddy() {
+  if run apt install -y caddy; then
+    return 0
+  fi
+
+  echo "==> Caddy package not found in current apt repos, adding official Caddy repo"
+  run mkdir -p /usr/share/keyrings /etc/apt/sources.list.d
+  run bash -c "curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg"
+  run bash -c "curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' > /etc/apt/sources.list.d/caddy-stable.list"
+  run apt update
+  run apt install -y caddy
+}
+
+install_caddy
 if [[ "${SKIP_FIREWALL}" = "0" ]]; then
   run apt install -y ufw
 fi
