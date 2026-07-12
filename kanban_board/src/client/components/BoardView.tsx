@@ -1,19 +1,15 @@
 import { useState, useMemo, useRef, useEffect, useLayoutEffect, useCallback } from 'react'
 import { DragDropContext, DropResult, DragStart, DragUpdate } from '@hello-pangea/dnd'
 import { useNavigate } from 'react-router-dom'
-import { BoardWithDetails, TaskWithDetails, CreateTaskInput, TaskFilters } from '@/lib/types'
+import { BoardWithDetails, TaskWithDetails, TaskFilters } from '@/lib/types'
 import { reorderTasksInBoard } from '@/lib/kanban-utils'
 import { KanbanColumn } from './KanbanColumn'
-import { TaskModal } from './TaskModal'
 import { EpicModal } from './EpicModal'
 import { Filters } from './Filters'
 
 type BoardViewProps = {
   board: BoardWithDetails
   onMoveTask: (taskId: string, columnId: string, position: number) => Promise<void>
-  onCreateTask: (data: CreateTaskInput) => Promise<void>
-  onUpdateTask: (taskId: string, data: Partial<CreateTaskInput>) => Promise<void>
-  onDeleteTask: (taskId: string) => Promise<void>
   onCreateEpic: (data: { title: string; description?: string; color: string }) => Promise<void>
   onCreateLabel: (data: { name: string; color: string }) => Promise<void>
   onRefresh: () => void
@@ -38,18 +34,12 @@ function writeStorage(key: string, value: string) {
 export function BoardView({
   board,
   onMoveTask,
-  onCreateTask,
-  onUpdateTask,
-  onDeleteTask,
   onCreateEpic,
   onCreateLabel: _onCreateLabel,
   onRefresh: _onRefresh,
 }: BoardViewProps) {
   const navigate = useNavigate()
-  const [selectedTask, setSelectedTask] = useState<TaskWithDetails | null>(null)
-  const [showTaskModal, setShowTaskModal] = useState(false)
   const [showEpicModal, setShowEpicModal] = useState(false)
-  const [taskColumnId, setTaskColumnId] = useState('')
   const [filters, setFilters] = useState<TaskFilters>(() => {
     const saved = readStorage(`kanban-filters-${board.id}`)
     if (!saved) return {}
@@ -277,25 +267,11 @@ export function BoardView({
   }
 
   const handleAddTask = () => {
-    setTaskColumnId(displayBoard.columns[activeColumnIndex]?.id || displayBoard.columns[0]?.id || '')
-    setSelectedTask(null)
-    setShowTaskModal(true)
+    navigate(`/boards/${displayBoard.id}/tasks/new`)
   }
 
   const handleTaskClick = (task: TaskWithDetails) => {
     navigate(`/boards/${displayBoard.id}/tasks/${task.id}`)
-  }
-
-  const handleSaveTask = async (data: CreateTaskInput) => {
-    if (selectedTask) {
-      await onUpdateTask(selectedTask.id, data)
-    } else {
-      await onCreateTask({ ...data, columnId: taskColumnId })
-    }
-  }
-
-  const handleDeleteTask = async () => {
-    if (selectedTask) await onDeleteTask(selectedTask.id)
   }
 
   const currentColumn = displayBoard.columns[activeColumnIndex]
@@ -355,14 +331,6 @@ export function BoardView({
             </div>
           </DragDropContext>
         </div>
-      )}
-
-      {showTaskModal && (
-        <TaskModal task={selectedTask} columnId={taskColumnId} columns={displayBoard.columns} epics={displayBoard.epics} labels={displayBoard.labels}
-          onClose={() => { setShowTaskModal(false); setSelectedTask(null) }}
-          onSave={handleSaveTask}
-          onDelete={selectedTask ? handleDeleteTask : undefined}
-        />
       )}
 
       {showEpicModal && (

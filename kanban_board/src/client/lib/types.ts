@@ -84,6 +84,7 @@ export type CreateTaskInput = {
   assignee?: string
   estimatedTime?: string
   labelIds?: string[]
+  meta?: string
 }
 
 export type UpdateTaskInput = Partial<CreateTaskInput>
