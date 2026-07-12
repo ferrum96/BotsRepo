@@ -8,14 +8,18 @@ DEFAULT_HOST="127.0.0.1"
 usage() {
   cat <<'USAGE'
 Usage:
-  caddy-route add --name NAME --path /prefix --upstream 127.0.0.1:PORT
-  caddy-route add-from-unit --unit UNIT --name NAME --path /prefix [--host 127.0.0.1]
+  caddy-route add --name NAME --path /prefix --upstream 127.0.0.1:PORT [--preserve-path]
+  caddy-route add-from-unit --unit UNIT --name NAME --path /prefix [--host 127.0.0.1] [--preserve-path]
   caddy-route sync --from DIR [--prefix /svc] [--host 127.0.0.1] [--include REGEX] [--exclude REGEX] [--dry-run]
   caddy-route remove --name NAME
   caddy-route list
 
+Options:
+  --preserve-path   Keep full request path (use for /api, /files). Default strips prefix.
+
 Examples:
   caddy-route add --name analytics --path /analytics --upstream 127.0.0.1:9100
+  caddy-route add --name fkandu-api --path /api --upstream 127.0.0.1:8000 --preserve-path
   caddy-route add-from-unit --unit kanban --name kanban --path /kanban
   caddy-route sync --from /etc/systemd/system --prefix /svc
   caddy-route remove --name analytics
@@ -243,6 +247,7 @@ add_route() {
   local name="$1"
   local prefix="$2"
   local upstream="$3"
+  local preserve_path="${4:-0}"
 
   validate_name "${name}"
   validate_upstream "${upstream}"
@@ -251,16 +256,25 @@ add_route() {
   prefix="$(normalize_prefix "${prefix}")"
 
   local route_file="${ROUTES_DIR}/${name}.caddy"
-  run tee "${route_file}" >/dev/null <<EOF
+  if [[ "${preserve_path}" = "1" ]]; then
+    run tee "${route_file}" >/dev/null <<EOF
+# ${name}
+handle ${prefix}* {
+    reverse_proxy ${upstream}
+}
+EOF
+  else
+    run tee "${route_file}" >/dev/null <<EOF
 # ${name}
 handle_path ${prefix}* {
     reverse_proxy ${upstream}
 }
 EOF
+  fi
 
   run caddy validate --config "${CADDYFILE_PATH}"
   run systemctl reload caddy
-  echo "Route added: ${name} (${prefix}* -> ${upstream})"
+  echo "Route added: ${name} (${prefix}* -> ${upstream}, preserve_path=${preserve_path})"
 }
 
 add_route_from_unit() {
@@ -268,6 +282,7 @@ add_route_from_unit() {
   local name="$2"
   local prefix="$3"
   local host="$4"
+  local preserve_path="${5:-0}"
   local unit_path port
 
   validate_name "${name}"
@@ -280,7 +295,7 @@ add_route_from_unit() {
     exit 1
   fi
 
-  add_route "${name}" "${prefix}" "${host}:${port}"
+  add_route "${name}" "${prefix}" "${host}:${port}" "${preserve_path}"
   echo "Detected from unit ${unit_path}: port ${port}"
 }
 
@@ -409,6 +424,7 @@ case "${COMMAND}" in
     NAME=""
     PREFIX=""
     UPSTREAM=""
+    PRESERVE_PATH="0"
     while [[ $# -gt 0 ]]; do
       case "$1" in
         --name)
@@ -423,6 +439,10 @@ case "${COMMAND}" in
           UPSTREAM="${2:-}"
           shift 2
           ;;
+        --preserve-path)
+          PRESERVE_PATH="1"
+          shift
+          ;;
         *)
           echo "Unknown argument: $1" >&2
           usage
@@ -434,13 +454,14 @@ case "${COMMAND}" in
       echo "add requires --name, --path, --upstream" >&2
       exit 1
     fi
-    add_route "${NAME}" "${PREFIX}" "${UPSTREAM}"
+    add_route "${NAME}" "${PREFIX}" "${UPSTREAM}" "${PRESERVE_PATH}"
     ;;
   add-from-unit)
     UNIT=""
     NAME=""
     PREFIX=""
     HOST="${DEFAULT_HOST}"
+    PRESERVE_PATH="0"
     while [[ $# -gt 0 ]]; do
       case "$1" in
         --unit)
@@ -459,6 +480,10 @@ case "${COMMAND}" in
           HOST="${2:-}"
           shift 2
           ;;
+        --preserve-path)
+          PRESERVE_PATH="1"
+          shift
+          ;;
         *)
           echo "Unknown argument: $1" >&2
           usage
@@ -470,7 +495,7 @@ case "${COMMAND}" in
       echo "add-from-unit requires --unit, --name, --path" >&2
       exit 1
     fi
-    add_route_from_unit "${UNIT}" "${NAME}" "${PREFIX}" "${HOST}"
+    add_route_from_unit "${UNIT}" "${NAME}" "${PREFIX}" "${HOST}" "${PRESERVE_PATH}"
     ;;
   sync)
     FROM_DIR="/etc/systemd/system"

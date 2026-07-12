@@ -169,12 +169,45 @@ should_add_gateway_path() {
 }
 
 write_route() {
+  # Strips path prefix before proxy (app expects routes at /).
   local name="$1"
   local path_prefix="$2"
   local upstream="$3"
   run tee "${ROUTES_DIR}/${name}.caddy" >/dev/null <<EOF
 # ${name}
 handle_path ${path_prefix}* {
+    reverse_proxy ${upstream}
+}
+EOF
+}
+
+write_preserve_route() {
+  # Keeps full path (app expects /api/..., /files/..., etc).
+  local name="$1"
+  local path_prefix="$2"
+  local upstream="$3"
+  run tee "${ROUTES_DIR}/${name}.caddy" >/dev/null <<EOF
+# ${name}
+handle ${path_prefix}* {
+    reverse_proxy ${upstream}
+}
+EOF
+}
+
+write_next_dashboard_route() {
+  # Next.js without basePath: HTML at /dashboard, assets at /_next/*.
+  local name="$1"
+  local path_prefix="$2"
+  local upstream="$3"
+  run tee "${ROUTES_DIR}/${name}.caddy" >/dev/null <<EOF
+# ${name}
+handle_path ${path_prefix}* {
+    reverse_proxy ${upstream}
+}
+handle /_next* {
+    reverse_proxy ${upstream}
+}
+handle /favicon.ico {
     reverse_proxy ${upstream}
 }
 EOF
@@ -244,13 +277,13 @@ if [[ "${SKIP_DEFAULT_ROUTES}" = "0" ]]; then
     write_route "kanban" "/kanban" "127.0.0.1:${PORT_KANBAN}"
   fi
   if should_add_gateway_path "${EFFECTIVE_SERVICE_DOMAIN_FKANDU_DASHBOARD}"; then
-    write_route "fkandu-dashboard" "/dashboard" "127.0.0.1:${PORT_FKANDU_DASHBOARD}"
+    write_next_dashboard_route "fkandu-dashboard" "/dashboard" "127.0.0.1:${PORT_FKANDU_DASHBOARD}"
   fi
   if should_add_gateway_path "${SERVICE_DOMAIN_FKANDU_API}"; then
-    write_route "fkandu-api" "/api" "127.0.0.1:${PORT_FKANDU_API}"
+    write_preserve_route "fkandu-api" "/api" "127.0.0.1:${PORT_FKANDU_API}"
   fi
   if should_add_gateway_path "${SERVICE_DOMAIN_FKANDU_FILES}"; then
-    write_route "fkandu-files" "/files" "127.0.0.1:${PORT_FKANDU_BOT_FILES}"
+    write_preserve_route "fkandu-files" "/files" "127.0.0.1:${PORT_FKANDU_BOT_FILES}"
   fi
   if should_add_gateway_path "${EFFECTIVE_SERVICE_DOMAIN_PUBG}"; then
     write_route "pubg" "/pubg" "127.0.0.1:${PORT_PUBG_API}"
