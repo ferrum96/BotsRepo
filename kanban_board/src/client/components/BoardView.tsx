@@ -1,11 +1,13 @@
 import { useState, useMemo, useRef, useEffect, useLayoutEffect, useCallback } from 'react'
 import { DragDropContext, DropResult, DragStart, DragUpdate } from '@hello-pangea/dnd'
 import { useNavigate } from 'react-router-dom'
-import { BoardWithDetails, TaskWithDetails, TaskFilters } from '@/lib/types'
+import { BoardWithDetails, TaskWithDetails, TaskFilters, User } from '@/lib/types'
+import { api } from '@/lib/api'
 import { reorderTasksInBoard } from '@/lib/kanban-utils'
 import { KanbanColumn } from './KanbanColumn'
 import { EpicModal } from './EpicModal'
 import { Filters } from './Filters'
+import { UserProfileButton } from './UserProfileButton'
 
 type BoardViewProps = {
   board: BoardWithDetails
@@ -56,6 +58,7 @@ export function BoardView({
   const [isMobile, setIsMobile] = useState(false)
   const [isDragging, setIsDragging] = useState(false)
   const [displayBoard, setDisplayBoard] = useState(board)
+  const [users, setUsers] = useState<User[]>([])
   const scrollRef = useRef<HTMLDivElement>(null)
   const savedScrollRef = useRef<number | null>(null)
   const savedColumnRef = useRef<number | null>(null)
@@ -71,14 +74,16 @@ export function BoardView({
     setDisplayBoard(board)
   }, [board])
 
-  const assignees = useMemo(() => {
-    const allAssignees = displayBoard.columns.flatMap((col) =>
-      col.tasks
-        .map((t) => t.assignee)
-        .filter((a): a is string => a !== null && a !== undefined)
-    )
-    return [...new Set(allAssignees)]
-  }, [displayBoard])
+  useEffect(() => {
+    api.users.list()
+      .then(setUsers)
+      .catch((err) => console.error('Failed to fetch users:', err))
+  }, [])
+
+  const assignees = useMemo(
+    () => users.map((user) => user.displayName).sort((a, b) => a.localeCompare(b, 'ru')),
+    [users]
+  )
 
   const filteredTasks = useMemo(() => {
     const tasksByColumn: Record<string, TaskWithDetails[]> = {}
@@ -279,24 +284,33 @@ export function BoardView({
   return (
     <div className="flex-1 flex flex-col overflow-hidden safari-fix-flex">
       <div className="p-4 md:p-6 border-b border-gray-200 bg-white">
-        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-          <div className="pl-12 md:pl-0">
-            <h1 className="text-xl md:text-2xl font-bold text-gray-900">{displayBoard.name}</h1>
+        <div className="flex items-start md:items-center justify-between gap-4">
+          <div className="pl-12 md:pl-0 min-w-0">
+            <h1 className="text-xl md:text-2xl font-bold text-gray-900 truncate">{displayBoard.name}</h1>
             <p className="text-sm text-gray-500 mt-1">
               {displayBoard.columns.reduce((acc, col) => acc + col.tasks.length, 0)} задач
             </p>
           </div>
-          <div className="flex items-center gap-3">
-            <button onClick={() => setShowEpicModal(true)} className="px-4 py-2 text-sm font-medium border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors">
+          <UserProfileButton />
+        </div>
+        <div className="mt-4 flex flex-col lg:flex-row lg:items-center lg:justify-between lg:gap-3">
+          <div className="flex items-center justify-end gap-3 flex-shrink-0 order-1 lg:order-2 w-full lg:w-auto mb-8 lg:mb-0">
+            <button
+              onClick={() => setShowEpicModal(true)}
+              className="px-4 py-2 text-sm font-medium border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+            >
               + Эпик
             </button>
-            <button onClick={handleAddTask} className="px-4 py-2 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors">
+            <button
+              onClick={handleAddTask}
+              className="px-4 py-2 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+            >
               Новая задача
             </button>
           </div>
-        </div>
-        <div className="mt-4">
-          <Filters epics={displayBoard.epics} assignees={assignees} filters={filters} onFilterChange={setFilters} />
+          <div className="order-2 lg:order-1 min-w-0 flex-1">
+            <Filters epics={displayBoard.epics} assignees={assignees} filters={filters} onFilterChange={setFilters} />
+          </div>
         </div>
       </div>
 
@@ -322,12 +336,13 @@ export function BoardView({
           </DragDropContext>
         </div>
       ) : (
-        <div ref={scrollRef} className="flex-1 min-h-0 overflow-x-auto scrollbar-none safari-scroll p-4 md:p-6 pb-20">
+        <div ref={scrollRef} className="flex-1 min-h-0 overflow-x-auto scrollbar-none safari-scroll p-3 md:p-4 pb-20">
           <DragDropContext onDragEnd={handleDragEnd}>
             <div className="flex gap-4 h-full">
               {displayBoard.columns.map((column) => (
                 <KanbanColumn key={column.id} column={column} tasks={filteredTasks[column.id] || []} onTaskClick={handleTaskClick} />
               ))}
+              <div className="w-4 md:w-6 flex-shrink-0" aria-hidden />
             </div>
           </DragDropContext>
         </div>

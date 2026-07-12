@@ -1,7 +1,9 @@
 import { useState, useEffect, useRef } from 'react'
-import { LayoutDashboard, Plus, ChevronLeft, ChevronRight, Trash2, Pencil, Menu } from 'lucide-react'
+import { LayoutDashboard, Plus, ChevronLeft, ChevronRight, Trash2, Pencil, Menu, LogOut } from 'lucide-react'
 import { CreateBoardModal } from './CreateBoardModal'
+import { UserProfileButton } from './UserProfileButton'
 import { api } from '@/lib/api'
+import type { AuthUser } from '@/lib/api'
 
 type Board = {
   id: string
@@ -14,6 +16,8 @@ type SidebarProps = {
   selectedBoardId: string | null
   onSelectBoard: (id: string) => void
   onBoardCreated: () => void
+  currentUser: AuthUser
+  onLogout: () => void
 }
 
 const SIDEBAR_KEY = 'kanban-sidebar-collapsed'
@@ -34,7 +38,7 @@ function writeStorage(key: string, value: string) {
   }
 }
 
-export function Sidebar({ boards, selectedBoardId, onSelectBoard, onBoardCreated }: SidebarProps) {
+export function Sidebar({ boards, selectedBoardId, onSelectBoard, onBoardCreated, currentUser, onLogout }: SidebarProps) {
   const [collapsed, setCollapsed] = useState(() => {
     return readStorage(SIDEBAR_KEY) === 'true'
   })
@@ -220,6 +224,24 @@ export function Sidebar({ boards, selectedBoardId, onSelectBoard, onBoardCreated
               )}
             </div>
           ))}
+        </div>
+
+        <div className={`border-t border-gray-700 p-3 ${collapsed ? 'md:hidden' : ''}`}>
+          <div className="flex items-center gap-2">
+            <UserProfileButton showName={false} variant="dark" />
+            <div className="min-w-0 flex-1 overflow-hidden">
+              <div className="text-sm truncate">{currentUser.displayName}</div>
+              <div className="text-xs text-gray-400 truncate">@{currentUser.username}</div>
+            </div>
+            <button
+              type="button"
+              onClick={onLogout}
+              title="Выйти"
+              className="p-2 hover:bg-gray-700 rounded flex-shrink-0"
+            >
+              <LogOut size={16} />
+            </button>
+          </div>
         </div>
       </aside>
 

@@ -16,7 +16,7 @@ kanban_board/
 │       ├── db/            # Drizzle schema + SQLite
 │       └── routes/        # boards, columns, tasks, epics, labels
 ├── drizzle/               # SQL-миграции
-├── data/                  # SQLite (prod.db / dev.db)
+├── data/                  # SQLite (kanban.db)
 ├── docker-compose.dev.yml
 ├── Dockerfile / Dockerfile.dev
 └── package.json
@@ -31,7 +31,28 @@ kanban_board/
 - **Лейблы** — цветные метки
 - **Приоритеты** — LOW, MEDIUM, HIGH, CRITICAL
 - **Фильтрация** — по эпику, исполнителю
+- **JWT-авторизация** — вход по логину и паролю
 - **Адаптивная вёрстка**
+
+## Учётные записи
+
+На **production** демо-учётки (`ivan` / `maria`) не создаются. Добавляйте пользователей скриптом:
+
+```bash
+npm run db:add-user -- petrov 'Secret123!' "Петров Иван"
+```
+
+В **development** (`NODE_ENV=development`) при старте сервера сидятся тестовые исполнители:
+
+| Логин | Пароль | Исполнитель |
+|-------|--------|-------------|
+| `ivan` | `ivan123` | Иван Петров |
+| `maria` | `maria123` | Мария Сидорова |
+
+```bash
+npm run db:seed          # только вне production
+npm run db:seed -- --force  # принудительно даже на prod (не рекомендуется)
+```
 
 ## Запуск (разработка)
 
@@ -68,6 +89,17 @@ npm run db:generate  # drizzle-kit generate
 npm run db:migrate   # drizzle-kit migrate
 npm run db:push      # drizzle-kit push
 npm run db:studio    # drizzle-kit studio
+npm run db:seed      # создать пользователей-исполнителей
+npm run db:add-user  # добавить/обновить пользователя
+```
+
+Добавить пользователя на проде:
+
+```bash
+cd /root/BotsRepo/kanban_board
+npm run db:add-user -- petrov 'Secret123!' "Петров Иван"
+# обновить пароль/ФИО существующего:
+npm run db:add-user -- petrov 'NewPass!' "Петров Иван" --force
 ```
 
 ## Production (VPS)

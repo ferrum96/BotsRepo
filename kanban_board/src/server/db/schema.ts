@@ -1,6 +1,15 @@
 import { sqliteTable, text, integer, primaryKey } from 'drizzle-orm/sqlite-core'
 import { relations } from 'drizzle-orm'
 
+export const users = sqliteTable('users', {
+  id: text('id').primaryKey(),
+  username: text('username').notNull().unique(),
+  passwordHash: text('passwordHash').notNull(),
+  displayName: text('displayName').notNull(),
+  avatar: text('avatar'),
+  createdAt: integer('createdAt', { mode: 'timestamp' }).notNull(),
+})
+
 export const boards = sqliteTable('boards', {
   id: text('id').primaryKey(),
   name: text('name').notNull(),
