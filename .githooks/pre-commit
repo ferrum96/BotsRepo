@@ -12,6 +12,7 @@ fi
 
 run_backend=0
 run_frontend=0
+run_kanban=0
 
 if echo "$staged" | grep '^pubg_moderator_bot/' | grep -qv '^pubg_moderator_bot/dashboard/frontend/'; then
   run_backend=1
@@ -19,8 +20,11 @@ fi
 if echo "$staged" | grep -q '^pubg_moderator_bot/dashboard/frontend/'; then
   run_frontend=1
 fi
+if echo "$staged" | grep -q '^kanban_board/'; then
+  run_kanban=1
+fi
 
-if [[ "$run_backend" -eq 0 && "$run_frontend" -eq 0 ]]; then
+if [[ "$run_backend" -eq 0 && "$run_frontend" -eq 0 && "$run_kanban" -eq 0 ]]; then
   exit 0
 fi
 
@@ -66,6 +70,19 @@ if [[ "$run_frontend" -eq 1 ]]; then
   (
     cd "$ROOT/pubg_moderator_bot/dashboard/frontend"
     npm test --silent
+  )
+fi
+
+if [[ "$run_kanban" -eq 1 ]]; then
+  if ! command -v npm >/dev/null 2>&1; then
+    echo "pre-commit: npm not found" >&2
+    exit 1
+  fi
+
+  echo "pre-commit: running kanban_board tests…"
+  (
+    cd "$ROOT/kanban_board"
+    npm run test:precommit
   )
 fi
 

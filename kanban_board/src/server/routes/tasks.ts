@@ -86,11 +86,13 @@ app.patch('/tasks/:id/move', async (c) => {
 
   const sourceColumnId = task.columnId
 
-  await db.transaction(async (tx) => {
-    const targetTasks = await tx.query.tasks.findMany({
-      where: eq(tasks.columnId, columnId),
-      orderBy: [asc(tasks.position)],
-    })
+  db.transaction((tx) => {
+    const targetTasks = tx
+      .select()
+      .from(tasks)
+      .where(eq(tasks.columnId, columnId))
+      .orderBy(asc(tasks.position))
+      .all()
     const others = targetTasks.filter((t) => t.id !== id)
     const insertIndex = Math.max(0, Math.min(position, others.length))
 
@@ -100,27 +102,31 @@ app.patch('/tasks/:id/move', async (c) => {
       ...others.slice(insertIndex),
     ]
 
-    await Promise.all(
-      reordered.map((t, idx) =>
-        tx.update(tasks).set({
-          columnId: t.columnId,
+    for (const [idx, reorderedTask] of reordered.entries()) {
+      tx.update(tasks)
+        .set({
+          columnId: reorderedTask.columnId,
           position: idx,
           updatedAt: new Date(),
-        }).where(eq(tasks.id, t.id))
-      )
-    )
+        })
+        .where(eq(tasks.id, reorderedTask.id))
+        .run()
+    }
 
     if (sourceColumnId !== columnId) {
-      const sourceTasks = await tx.query.tasks.findMany({
-        where: eq(tasks.columnId, sourceColumnId),
-        orderBy: [asc(tasks.position)],
-      })
+      const sourceTasks = tx
+        .select()
+        .from(tasks)
+        .where(eq(tasks.columnId, sourceColumnId))
+        .orderBy(asc(tasks.position))
+        .all()
       const sourceOthers = sourceTasks.filter((t) => t.id !== id)
-      await Promise.all(
-        sourceOthers.map((t, idx) =>
-          tx.update(tasks).set({ position: idx, updatedAt: new Date() }).where(eq(tasks.id, t.id))
-        )
-      )
+      for (const [idx, sourceTask] of sourceOthers.entries()) {
+        tx.update(tasks)
+          .set({ position: idx, updatedAt: new Date() })
+          .where(eq(tasks.id, sourceTask.id))
+          .run()
+      }
     }
   })
 
