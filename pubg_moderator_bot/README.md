@@ -127,6 +127,12 @@ docker compose -f docker-compose.dev.yml up --build
 
 Используется **systemd**, не Docker — см. [deploy/DEPLOY.md](../deploy/DEPLOY.md).
 
+Текущий production URL:
+- `https://bb-clan.duckdns.org/`
+
+Legacy-доступ через host-nginx порт:
+- `http://IP:447`
+
 ## Безопасность дашборда
 
 Если `DASHBOARD_API_KEY` задан, все `POST` endpoints (kick, unblock и т.д.)

@@ -3,6 +3,7 @@
 На **локальной машине** все сервисы поднимаются через **`docker-compose.dev.yml`** в каждом проекте.
 
 На **сервере (VPS)** используется **systemd** — см. [deploy/DEPLOY.md](./deploy/DEPLOY.md).
+HTTPS/домены production настраиваются через `deploy/domains.env` и `deploy/duckdns-caddy-setup.sh`.
 
 ## Быстрый старт
 

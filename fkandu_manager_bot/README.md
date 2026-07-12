@@ -75,9 +75,14 @@ npm run dev
 
 | URL | Сервис |
 |-----|--------|
-| http://IP:444 | fkandu-dashboard |
-| http://IP:445 | fkandu-api |
-| http://IP:446 | fkandu-bot (файлы) |
+| https://fkandu.duckdns.org/dashboard | fkandu-dashboard |
+| https://fkandu.duckdns.org/api | fkandu-api |
+| https://fkandu.duckdns.org/files | fkandu-bot (файлы) |
+
+Legacy-доступ через host-nginx порты (если нужен):
+- `http://IP:444` -> dashboard
+- `http://IP:445` -> api
+- `http://IP:446` -> files
 
 См. [deploy/DEPLOY.md](../deploy/DEPLOY.md).
 
