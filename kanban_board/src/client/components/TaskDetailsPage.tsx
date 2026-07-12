@@ -1,7 +1,9 @@
 import { ChangeEvent, MouseEvent as ReactMouseEvent, useEffect, useMemo, useRef, useState } from 'react'
 import { ArrowLeft, Download, Paperclip, Pencil, Send, Trash2, X } from 'lucide-react'
 import { createPortal } from 'react-dom'
-import { BoardWithDetails } from '@/lib/types'
+import { BoardWithDetails, User } from '@/lib/types'
+import { api } from '@/lib/api'
+import { useAuth } from '@/lib/auth'
 import { formatTaskId, getPriorityBadgeColor, getPriorityLabel } from '@/lib/kanban-utils'
 import { RichTextEditor, renderRichText } from './RichTextEditor'
 import { LabelBadge } from './LabelBadge'
@@ -112,6 +114,7 @@ export function TaskDetailsPage({
   onBack,
   onUpdateTask,
 }: TaskDetailsPageProps) {
+  const { user } = useAuth()
   const task = useMemo(
     () => board.columns.flatMap((column) => column.tasks).find((item) => item.id === taskId) ?? null,
     [board, taskId]
@@ -125,7 +128,7 @@ export function TaskDetailsPage({
   const [isSavingDescription, setIsSavingDescription] = useState(false)
   const [isEditingDescription, setIsEditingDescription] = useState(!(task?.description ?? '').trim())
   const [commentBody, setCommentBody] = useState('')
-  const [commentAuthor, setCommentAuthor] = useState('You')
+  const [commentAuthor, setCommentAuthor] = useState(user?.displayName || 'You')
   const [isEditingComment, setIsEditingComment] = useState(false)
   const [openStatusMenu, setOpenStatusMenu] = useState(false)
   const [openPriorityMenu, setOpenPriorityMenu] = useState(false)
@@ -142,7 +145,18 @@ export function TaskDetailsPage({
   const [actualDateDraft, setActualDateDraft] = useState(DEFAULT_ACTUAL_DATE())
   const [actualTimeError, setActualTimeError] = useState('')
   const [previewImage, setPreviewImage] = useState<{ src: string; name: string } | null>(null)
+  const [users, setUsers] = useState<User[]>([])
   const detailsPanelRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (user?.displayName) setCommentAuthor(user.displayName)
+  }, [user?.displayName])
+
+  useEffect(() => {
+    api.users.list()
+      .then(setUsers)
+      .catch((err) => console.error('Failed to fetch users:', err))
+  }, [])
 
   useEffect(() => {
     if (!task) return
@@ -345,14 +359,10 @@ export function TaskDetailsPage({
   }
 
   const isImageAttachment = (file: TaskAttachment) => file.type.startsWith('image/')
-  const assigneeOptions = useMemo(() => {
-    const fromBoard = board.columns
-      .flatMap((column) => column.tasks)
-      .map((item) => item.assignee)
-      .filter((value): value is string => Boolean(value?.trim()))
-
-    return Array.from(new Set(fromBoard)).sort((a, b) => a.localeCompare(b, 'ru'))
-  }, [board])
+  const assigneeOptions = useMemo(
+    () => users.map((item) => item.displayName).sort((a, b) => a.localeCompare(b, 'ru')),
+    [users]
+  )
   const filteredAssignees = assigneeOptions.filter((name) =>
     name.toLowerCase().includes(assigneeQuery.trim().toLowerCase())
   )

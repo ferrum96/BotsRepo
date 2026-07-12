@@ -5,6 +5,7 @@ import { BoardView } from './components/BoardView'
 import { TaskDetailsPage } from './components/TaskDetailsPage'
 import { NewTaskPage } from './components/NewTaskPage'
 import { api } from './lib/api'
+import { useAuth } from './lib/auth'
 import { reorderTasksInBoard } from './lib/kanban-utils'
 import { Board, BoardWithDetails } from './lib/types'
 
@@ -29,12 +30,18 @@ function writeStorage(key: string, value: string) {
 export default function App() {
   const navigate = useNavigate()
   const { boardId: routeBoardId, taskId } = useParams()
+  const { user, logout } = useAuth()
   const [boards, setBoards] = useState<(Board & { _count: { tasks: number } })[]>([])
   const [selectedBoardId, setSelectedBoardId] = useState<string | null>(() => {
     return readStorage(STORAGE_KEY)
   })
   const [board, setBoard] = useState<BoardWithDetails | null>(null)
   const [loading, setLoading] = useState(true)
+
+  const handleLogout = () => {
+    logout()
+    navigate('/login', { replace: true })
+  }
 
   useEffect(() => {
     if (!routeBoardId) return
@@ -120,6 +127,8 @@ export default function App() {
         selectedBoardId={selectedBoardId}
         onSelectBoard={handleSelectBoard}
         onBoardCreated={fetchBoards}
+        currentUser={user!}
+        onLogout={handleLogout}
       />
 
       <main className="flex-1 min-h-0 flex flex-col overflow-hidden safari-fix-flex">
@@ -135,7 +144,7 @@ export default function App() {
               const task = await api.tasks.create(board.id, data)
               await fetchBoard()
               await fetchBoards()
-              navigate(`/boards/${board.id}/tasks/${task.id}`)
+              navigate('/')
               return task
             }}
           />

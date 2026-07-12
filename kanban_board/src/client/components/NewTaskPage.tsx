@@ -1,6 +1,7 @@
 import { ChangeEvent, useEffect, useMemo, useRef, useState } from 'react'
 import { Download, Paperclip, Trash2 } from 'lucide-react'
-import { BoardWithDetails, CreateTaskInput } from '@/lib/types'
+import { BoardWithDetails, CreateTaskInput, User } from '@/lib/types'
+import { api } from '@/lib/api'
 import { getPriorityBadgeColor, getPriorityLabel } from '@/lib/kanban-utils'
 import { RichTextEditor } from './RichTextEditor'
 
@@ -73,6 +74,7 @@ export function NewTaskPage({ board, onCancel, onCreateTask }: NewTaskPageProps)
   const [actualTimeError, setActualTimeError] = useState('')
   const [saving, setSaving] = useState(false)
   const [titleError, setTitleError] = useState('')
+  const [users, setUsers] = useState<User[]>([])
   const detailsPanelRef = useRef<HTMLDivElement>(null)
 
   const selectedColumn = useMemo(
@@ -80,13 +82,25 @@ export function NewTaskPage({ board, onCancel, onCreateTask }: NewTaskPageProps)
     [board.columns, columnId]
   )
 
-  const assigneeOptions = useMemo(() => {
-    const fromBoard = board.columns
-      .flatMap((column) => column.tasks)
-      .map((item) => item.assignee)
-      .filter((value): value is string => Boolean(value?.trim()))
-    return Array.from(new Set(fromBoard)).sort((a, b) => a.localeCompare(b, 'ru'))
-  }, [board])
+  const statusColumns = useMemo(
+    () =>
+      board.columns.filter((column) => {
+        const normalizedTitle = column.title.toUpperCase().replaceAll(/[\s_-]+/g, ' ').trim()
+        return normalizedTitle !== 'IN REVIEW' && normalizedTitle !== 'DONE'
+      }),
+    [board.columns]
+  )
+
+  useEffect(() => {
+    api.users.list()
+      .then(setUsers)
+      .catch((err) => console.error('Failed to fetch users:', err))
+  }, [])
+
+  const assigneeOptions = useMemo(
+    () => users.map((user) => user.displayName).sort((a, b) => a.localeCompare(b, 'ru')),
+    [users]
+  )
 
   const filteredAssignees = assigneeOptions.filter((name) =>
     name.toLowerCase().includes(assigneeQuery.trim().toLowerCase())
@@ -458,9 +472,10 @@ export function NewTaskPage({ board, onCancel, onCreateTask }: NewTaskPageProps)
                 {openStatusMenu && (
                   <div
                     data-details-dropdown
-                    className="absolute right-0 top-[calc(100%+4px)] z-20 w-[min(86vw,220px)] rounded-lg border border-gray-200 bg-white p-1 shadow-lg"
+                    className="absolute right-0 top-[calc(100%+4px)] z-20 w-[min(86vw,220px)] rounded-xl border border-gray-200 bg-white p-1.5 shadow-lg"
                   >
-                    {board.columns.map((column) => (
+                    <div className="space-y-1">
+                      {statusColumns.map((column) => (
                       <button
                         key={column.id}
                         type="button"
@@ -468,14 +483,15 @@ export function NewTaskPage({ board, onCancel, onCreateTask }: NewTaskPageProps)
                           setColumnId(column.id)
                           setOpenStatusMenu(false)
                         }}
-                        className={`block w-full cursor-pointer rounded-md px-2 py-1.5 text-left text-sm hover:bg-gray-100 ${
+                        className={`block w-full cursor-pointer rounded-lg px-2.5 py-2 text-left text-sm hover:bg-gray-100 ${
                           column.id === columnId ? 'bg-gray-100 text-gray-900' : 'text-gray-700'
                         }`}
                         style={{ borderLeft: `3px solid ${column.color}` }}
                       >
                         {column.title}
                       </button>
-                    ))}
+                      ))}
+                    </div>
                   </div>
                 )}
               </div>

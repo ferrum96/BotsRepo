@@ -7,14 +7,25 @@ import tasksRouter from './routes/tasks.js'
 import columnsRouter from './routes/columns.js'
 import epicsRouter from './routes/epics.js'
 import labelsRouter from './routes/labels.js'
+import authRouter from './routes/auth.js'
+import usersRouter from './routes/users.js'
+import { authMiddleware, type AppVariables } from './auth.js'
+import { seedUsers } from './db/seed.js'
 import { existsSync } from 'fs'
 
-const app = new Hono()
+if (process.env.NODE_ENV === 'development') {
+  await seedUsers()
+}
+
+const app = new Hono<{ Variables: AppVariables }>()
 
 app.use('/api/*', cors())
+app.use('/api/*', authMiddleware)
 
 app.get('/api/health', (c) => c.json({ status: 'ok' }))
 
+app.route('/api/auth', authRouter)
+app.route('/api/users', usersRouter)
 app.route('/api/boards', boardsRouter)
 app.route('/api', tasksRouter)
 app.route('/api', columnsRouter)
