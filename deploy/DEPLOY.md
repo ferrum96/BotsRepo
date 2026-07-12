@@ -206,6 +206,21 @@ systemctl status caddy --no-pager
 curl -I https://YOUR_GATEWAY_DOMAIN
 ```
 
+### Если HTTP-01 challenge не проходит (fallback DNS-01)
+
+Используйте DNS-01 через DuckDNS (обходит проблемы с `/.well-known/acme-challenge/...`):
+
+```bash
+./deploy/duckdns-dns01-caddy-setup.sh \
+  --email you@example.com \
+  --duckdns-token YOUR_DUCKDNS_TOKEN
+```
+
+Этот скрипт:
+- выпускает сертификаты через `acme.sh` + `dns_duckdns`;
+- устанавливает сертификаты в `/etc/caddy/certs/*`;
+- генерирует Caddyfile с явным `tls <fullchain> <key>` для доменов.
+
 ### Добавление будущих сервисов
 
 После установки доступна команда `caddy-route`:
