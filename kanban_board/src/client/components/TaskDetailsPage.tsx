@@ -65,6 +65,7 @@ type TaskDetailsUpdateInput = {
 
 const TASK_ATTACHMENTS_ACCEPT =
   'image/*,image/heic,image/heif,video/*,.heic,.heif,.jpg,.jpeg,.png,.gif,.webp,.bmp,.svg,.avif,.mp4,.mov,.m4v,.avi,.webm,.pdf,.doc,.docx,.xls,.xlsx,.txt,.zip,.rar,.ppt,.pptx'
+const DESCRIPTION_PREVIEW_HEIGHT = 345
 
 const getMetaKey = (taskId: string) => `kanban-task-meta-${taskId}`
 const DEFAULT_ACTUAL_DATE = () => new Date().toISOString().slice(0, 10)
@@ -129,6 +130,7 @@ export function TaskDetailsPage({
   const [isSavingDescription, setIsSavingDescription] = useState(false)
   const [isEditingDescription, setIsEditingDescription] = useState(!(task?.description ?? '').trim())
   const [isDescriptionExpanded, setIsDescriptionExpanded] = useState(false)
+  const [canExpandDescription, setCanExpandDescription] = useState(false)
   const [commentBody, setCommentBody] = useState('')
   const [commentAuthor, setCommentAuthor] = useState(user?.displayName || 'You')
   const [isEditingComment, setIsEditingComment] = useState(false)
@@ -149,6 +151,7 @@ export function TaskDetailsPage({
   const [previewImage, setPreviewImage] = useState<{ src: string; name: string } | null>(null)
   const [users, setUsers] = useState<User[]>([])
   const detailsPanelRef = useRef<HTMLDivElement>(null)
+  const descriptionPreviewRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     if (user?.displayName) setCommentAuthor(user.displayName)
@@ -165,6 +168,7 @@ export function TaskDetailsPage({
     setDescription(task.description ?? '')
     setIsEditingDescription(!(task.description ?? '').trim())
     setIsDescriptionExpanded(false)
+    setCanExpandDescription(false)
     setEstimatedTimeDraft(task.estimatedTime ?? '')
     setIsEditingEstimate(false)
     setOpenStatusMenu(false)
@@ -177,6 +181,31 @@ export function TaskDetailsPage({
     setActualDateDraft(DEFAULT_ACTUAL_DATE())
     setActualTimeError('')
   }, [task])
+
+  useEffect(() => {
+    if (isEditingDescription || !description.trim()) {
+      setCanExpandDescription(false)
+      return
+    }
+
+    const preview = descriptionPreviewRef.current
+    if (!preview) return
+
+    const measureOverflow = () => {
+      const hasOverflow = preview.scrollHeight > DESCRIPTION_PREVIEW_HEIGHT + 2
+      setCanExpandDescription(hasOverflow)
+      if (!hasOverflow && isDescriptionExpanded) {
+        setIsDescriptionExpanded(false)
+      }
+    }
+
+    const frameId = window.requestAnimationFrame(measureOverflow)
+    window.addEventListener('resize', measureOverflow)
+    return () => {
+      window.cancelAnimationFrame(frameId)
+      window.removeEventListener('resize', measureOverflow)
+    }
+  }, [description, isEditingDescription, isDescriptionExpanded, meta.richImages])
 
   useEffect(() => {
     const handleOutsideClick = (event: globalThis.MouseEvent) => {
@@ -377,8 +406,8 @@ export function TaskDetailsPage({
     }
 
     const unitToMinutes: Record<string, number> = {
-      w: 5 * 8 * 60,
-      d: 8 * 60,
+      w: 7 * 24 * 60,
+      d: 24 * 60,
       h: 60,
       m: 1,
     }
@@ -437,26 +466,11 @@ export function TaskDetailsPage({
 
   const formatMinutesToDuration = (minutes: number) => {
     if (minutes <= 0) return '0m'
-
-    const units = [
-      { key: 'w', value: 5 * 8 * 60 },
-      { key: 'd', value: 8 * 60 },
-      { key: 'h', value: 60 },
-      { key: 'm', value: 1 },
-    ] as const
-
-    let rest = minutes
-    const result: string[] = []
-
-    units.forEach(({ key, value }) => {
-      const amount = Math.floor(rest / value)
-      if (amount > 0) {
-        result.push(`${amount}${key}`)
-        rest -= amount * value
-      }
-    })
-
-    return result.join(' ')
+    const hours = Math.floor(minutes / 60)
+    const restMinutes = minutes % 60
+    if (!restMinutes) return `${hours}h`
+    if (!hours) return `${restMinutes}m`
+    return `${hours}h ${restMinutes}m`
   }
 
   const estimatedMinutes = useMemo(
@@ -467,7 +481,8 @@ export function TaskDetailsPage({
     () => meta.timeEntries.reduce((acc, entry) => acc + entry.minutes, 0),
     [meta.timeEntries]
   )
-  const spentPercent = estimatedMinutes > 0 ? Math.min(100, Math.round((spentMinutes / estimatedMinutes) * 100)) : 0
+  const spentPercentRaw = estimatedMinutes > 0 ? Math.round((spentMinutes / estimatedMinutes) * 100) : 0
+  const spentPercent = Math.min(100, spentPercentRaw)
   const isOverSpent = estimatedMinutes > 0 && spentMinutes > estimatedMinutes
 
   const addActualTimeEntry = () => {
@@ -596,7 +611,15 @@ export function TaskDetailsPage({
                 )}
               </div>
               <div className="rounded-xl border border-gray-100 bg-gray-50 p-4">
-                <div className={!isEditingDescription && !isDescriptionExpanded ? 'max-h-64 overflow-y-auto scrollbar-none pr-1' : undefined}>
+                <div
+                  ref={descriptionPreviewRef}
+                  className={!isEditingDescription && !isDescriptionExpanded ? 'overflow-y-auto scrollbar-none pr-1' : undefined}
+                  style={
+                    !isEditingDescription && !isDescriptionExpanded
+                      ? { height: `${DESCRIPTION_PREVIEW_HEIGHT}px` }
+                      : undefined
+                  }
+                >
                   {isEditingDescription ? (
                     <>
                       <RichTextEditor
@@ -641,7 +664,7 @@ export function TaskDetailsPage({
                     <p className="text-sm text-gray-400">Описание пока не заполнено</p>
                   )}
                 </div>
-                {!isEditingDescription && description.trim() && (
+                {!isEditingDescription && canExpandDescription && (
                   <div className="mt-3 flex justify-center border-t border-gray-200 pt-3">
                     <button
                       type="button"
@@ -1057,7 +1080,7 @@ export function TaskDetailsPage({
                 </div>
                 <p className="text-xs text-gray-600">
                   {formatMinutesToDuration(spentMinutes)} из {task.estimatedTime || 'без оценки'}
-                  {estimatedMinutes > 0 && ` (${spentPercent}%)`}
+                  {estimatedMinutes > 0 && ` (${spentPercentRaw}%)`}
                 </p>
                 {isOverSpent && <p className="mt-1 text-xs text-red-500">Превышение оценки</p>}
 

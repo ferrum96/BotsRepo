@@ -155,8 +155,8 @@ export function NewTaskPage({ board, onCancel, onCreateTask }: NewTaskPageProps)
     }
 
     const unitToMinutes: Record<string, number> = {
-      w: 5 * 8 * 60,
-      d: 8 * 60,
+      w: 7 * 24 * 60,
+      d: 24 * 60,
       h: 60,
       m: 1,
     }
@@ -203,27 +203,17 @@ export function NewTaskPage({ board, onCancel, onCreateTask }: NewTaskPageProps)
 
   const formatMinutesToDuration = (minutes: number) => {
     if (minutes <= 0) return '0m'
-    const units = [
-      { key: 'w', value: 5 * 8 * 60 },
-      { key: 'd', value: 8 * 60 },
-      { key: 'h', value: 60 },
-      { key: 'm', value: 1 },
-    ] as const
-    let rest = minutes
-    const result: string[] = []
-    units.forEach(({ key, value }) => {
-      const amount = Math.floor(rest / value)
-      if (amount > 0) {
-        result.push(`${amount}${key}`)
-        rest -= amount * value
-      }
-    })
-    return result.join(' ')
+    const hours = Math.floor(minutes / 60)
+    const restMinutes = minutes % 60
+    if (!restMinutes) return `${hours}h`
+    if (!hours) return `${restMinutes}m`
+    return `${hours}h ${restMinutes}m`
   }
 
   const estimatedMinutes = parseDurationInput(estimatedTime).totalMinutes
   const spentMinutes = meta.timeEntries.reduce((acc, entry) => acc + entry.minutes, 0)
-  const spentPercent = estimatedMinutes > 0 ? Math.min(100, Math.round((spentMinutes / estimatedMinutes) * 100)) : 0
+  const spentPercentRaw = estimatedMinutes > 0 ? Math.round((spentMinutes / estimatedMinutes) * 100) : 0
+  const spentPercent = Math.min(100, spentPercentRaw)
   const isOverSpent = estimatedMinutes > 0 && spentMinutes > estimatedMinutes
 
   const handleAttachFiles = async (event: ChangeEvent<HTMLInputElement>) => {
@@ -690,7 +680,7 @@ export function NewTaskPage({ board, onCancel, onCreateTask }: NewTaskPageProps)
                 </div>
                 <p className="text-xs text-gray-600">
                   {formatMinutesToDuration(spentMinutes)} из {estimatedTime || 'без оценки'}
-                  {estimatedMinutes > 0 && ` (${spentPercent}%)`}
+                  {estimatedMinutes > 0 && ` (${spentPercentRaw}%)`}
                 </p>
 
                 {isAddingActualTime && (
