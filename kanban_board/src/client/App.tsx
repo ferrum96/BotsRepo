@@ -3,6 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom'
 import { Sidebar } from './components/Sidebar'
 import { BoardView } from './components/BoardView'
 import { TaskDetailsPage } from './components/TaskDetailsPage'
+import { NewTaskPage } from './components/NewTaskPage'
 import { api } from './lib/api'
 import { reorderTasksInBoard } from './lib/kanban-utils'
 import { Board, BoardWithDetails } from './lib/types'
@@ -102,23 +103,6 @@ export default function App() {
     }
   }
 
-  const handleCreateTask = async (data: any) => {
-    await api.tasks.create(selectedBoardId!, data)
-    await fetchBoard()
-    await fetchBoards()
-  }
-
-  const handleUpdateTask = async (taskId: string, data: any) => {
-    await api.tasks.update(taskId, data)
-    await fetchBoard()
-  }
-
-  const handleDeleteTask = async (taskId: string) => {
-    await api.tasks.delete(taskId)
-    await fetchBoard()
-    await fetchBoards()
-  }
-
   const handleCreateEpic = async (data: { title: string; description?: string; color: string }) => {
     await api.epics.create(selectedBoardId!, data)
     await fetchBoard()
@@ -143,6 +127,18 @@ export default function App() {
           <div className="flex items-center justify-center h-full">
             <div className="text-gray-500">Загрузка...</div>
           </div>
+        ) : taskId === 'new' && board ? (
+          <NewTaskPage
+            board={board}
+            onCancel={() => navigate('/')}
+            onCreateTask={async (data) => {
+              const task = await api.tasks.create(board.id, data)
+              await fetchBoard()
+              await fetchBoards()
+              navigate(`/boards/${board.id}/tasks/${task.id}`)
+              return task
+            }}
+          />
         ) : taskId && board ? (
           <TaskDetailsPage
             board={board}
@@ -160,9 +156,6 @@ export default function App() {
           <BoardView
             board={board}
             onMoveTask={handleMoveTask}
-            onCreateTask={handleCreateTask}
-            onUpdateTask={handleUpdateTask}
-            onDeleteTask={handleDeleteTask}
             onCreateEpic={handleCreateEpic}
             onCreateLabel={handleCreateLabel}
             onRefresh={fetchBoard}
