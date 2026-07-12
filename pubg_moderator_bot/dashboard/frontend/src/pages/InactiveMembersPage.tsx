@@ -112,7 +112,7 @@ export function InactiveMembersPage() {
           onClick={() => kickConfirm.openFor(row.user_id)}
           disabled={kickMember.isPending}
         >
-          {kickMember.isPending && kickMember.variables === row.user_id ? 'Удаляю…' : 'Удалить'}
+          {kickMember.isPending && kickMember.variables === row.user_id ? 'Удаляю…' : 'Удалить из группы'}
         </Button>
       ),
     },

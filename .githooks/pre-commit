@@ -1,0 +1,72 @@
+#!/usr/bin/env bash
+# Run project checks before commit. Install: ./scripts/install-git-hooks.sh
+set -euo pipefail
+
+ROOT="$(git rev-parse --show-toplevel)"
+cd "$ROOT"
+
+staged="$(git diff --cached --name-only --diff-filter=ACMR || true)"
+if [[ -z "$staged" ]]; then
+  exit 0
+fi
+
+run_backend=0
+run_frontend=0
+
+if echo "$staged" | grep '^pubg_moderator_bot/' | grep -qv '^pubg_moderator_bot/dashboard/frontend/'; then
+  run_backend=1
+fi
+if echo "$staged" | grep -q '^pubg_moderator_bot/dashboard/frontend/'; then
+  run_frontend=1
+fi
+
+if [[ "$run_backend" -eq 0 && "$run_frontend" -eq 0 ]]; then
+  exit 0
+fi
+
+resolve_python() {
+  local candidates=(
+    "$ROOT/pubg_moderator_bot/.venv/bin/python"
+    "$ROOT/.venv/bin/python"
+  )
+  local py
+  for py in "${candidates[@]}"; do
+    if [[ -x "$py" ]]; then
+      echo "$py"
+      return 0
+    fi
+  done
+  if command -v python3 >/dev/null 2>&1; then
+    command -v python3
+    return 0
+  fi
+  return 1
+}
+
+if [[ "$run_backend" -eq 1 ]]; then
+  PY="$(resolve_python)" || {
+    echo "pre-commit: python not found (create pubg_moderator_bot/.venv first)" >&2
+    exit 1
+  }
+
+  echo "pre-commit: running pubg_moderator_bot pytest…"
+  (
+    cd "$ROOT/pubg_moderator_bot"
+    "$PY" -m pytest -q --tb=line
+  )
+fi
+
+if [[ "$run_frontend" -eq 1 ]]; then
+  if ! command -v npm >/dev/null 2>&1; then
+    echo "pre-commit: npm not found" >&2
+    exit 1
+  fi
+
+  echo "pre-commit: running pubg dashboard frontend tests…"
+  (
+    cd "$ROOT/pubg_moderator_bot/dashboard/frontend"
+    npm test --silent
+  )
+fi
+
+echo "pre-commit: ok"
