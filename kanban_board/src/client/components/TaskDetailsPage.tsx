@@ -1,10 +1,11 @@
 import { ChangeEvent, MouseEvent as ReactMouseEvent, useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowLeft, Download, Paperclip, Pencil, Send, Trash2, X } from 'lucide-react'
+import { ArrowDownUp, ArrowLeft, Download, Paperclip, Pencil, Send, Trash2, X } from 'lucide-react'
 import { createPortal } from 'react-dom'
 import { BoardWithDetails, User } from '@/lib/types'
 import { api } from '@/lib/api'
 import { useAuth } from '@/lib/auth'
 import { formatTaskId, getPriorityBadgeColor, getPriorityLabel } from '@/lib/kanban-utils'
+import { safeRandomUUID } from '@/lib/uuid'
 import { RichTextEditor, renderRichText } from './RichTextEditor'
 import { LabelBadge } from './LabelBadge'
 
@@ -127,6 +128,7 @@ export function TaskDetailsPage({
   const [description, setDescription] = useState(task?.description ?? '')
   const [isSavingDescription, setIsSavingDescription] = useState(false)
   const [isEditingDescription, setIsEditingDescription] = useState(!(task?.description ?? '').trim())
+  const [isDescriptionExpanded, setIsDescriptionExpanded] = useState(false)
   const [commentBody, setCommentBody] = useState('')
   const [commentAuthor, setCommentAuthor] = useState(user?.displayName || 'You')
   const [isEditingComment, setIsEditingComment] = useState(false)
@@ -162,6 +164,7 @@ export function TaskDetailsPage({
     if (!task) return
     setDescription(task.description ?? '')
     setIsEditingDescription(!(task.description ?? '').trim())
+    setIsDescriptionExpanded(false)
     setEstimatedTimeDraft(task.estimatedTime ?? '')
     setIsEditingEstimate(false)
     setOpenStatusMenu(false)
@@ -239,7 +242,7 @@ export function TaskDetailsPage({
   }
 
   const storeRichImage = (input: { name: string; dataUrl: string }) => {
-    const id = crypto.randomUUID()
+    const id = safeRandomUUID()
     const nextMeta: TaskMeta = {
       ...meta,
       richImages: {
@@ -270,7 +273,7 @@ export function TaskDetailsPage({
   const handleAddComment = () => {
     if (!task || !commentBody.trim()) return
     const nextComment: TaskComment = {
-      id: crypto.randomUUID(),
+      id: safeRandomUUID(),
       body: commentBody.trim(),
       author: commentAuthor.trim() || 'You',
       createdAt: new Date().toISOString(),
@@ -312,7 +315,7 @@ export function TaskDetailsPage({
             }
             const inferredTypeFromDataUrl = inferMimeFromDataUrl(fileDataUrl)
             return {
-              id: crypto.randomUUID(),
+              id: safeRandomUUID(),
               name: file.name,
               type:
                 (file.type && file.type !== 'application/octet-stream'
@@ -486,7 +489,7 @@ export function TaskDetailsPage({
     }
 
     const entry: TaskTimeEntry = {
-      id: crypto.randomUUID(),
+      id: safeRandomUUID(),
       date: actualDateDraft,
       duration: check.normalized,
       minutes,
@@ -511,6 +514,34 @@ export function TaskDetailsPage({
   }
   const handleRichTextMediaClick = (event: ReactMouseEvent<HTMLDivElement>) => {
     const target = event.target
+    if (!(target instanceof Element)) return
+
+    const copyButton = target.closest<HTMLButtonElement>('[data-copy-code]')
+    if (copyButton) {
+      event.preventDefault()
+      event.stopPropagation()
+      const encodedCode = copyButton.getAttribute('data-copy-code')
+      if (!encodedCode) return
+      const codeToCopy = safeDecodeURIComponent(encodedCode)
+      if (!codeToCopy) return
+
+      void copyToClipboard(codeToCopy).then((copied) => {
+        copyButton.textContent = copied ? 'Скопировано' : 'Ошибка'
+        window.setTimeout(() => {
+          copyButton.textContent = 'Копировать'
+        }, 1400)
+      })
+      return
+    }
+
+    const collapsibleCode = target.closest<HTMLElement>('[data-toggle-code]')
+    if (collapsibleCode) {
+      event.preventDefault()
+      event.stopPropagation()
+      collapsibleCode.classList.toggle('rich-text-code-expanded')
+      return
+    }
+
     if (!(target instanceof HTMLImageElement)) return
     if (!target.classList.contains('rich-text-image')) return
     setPreviewImage({
@@ -565,48 +596,62 @@ export function TaskDetailsPage({
                 )}
               </div>
               <div className="rounded-xl border border-gray-100 bg-gray-50 p-4">
-                {isEditingDescription ? (
-                  <>
-                    <RichTextEditor
-                      value={description}
-                      onChange={setDescription}
-                      onStoreImage={storeRichImage}
-                      minRows={8}
-                      placeholder="Опиши задачу, добавь форматирование и кодовые блоки..."
+                <div className={!isEditingDescription && !isDescriptionExpanded ? 'max-h-64 overflow-y-auto scrollbar-none pr-1' : undefined}>
+                  {isEditingDescription ? (
+                    <>
+                      <RichTextEditor
+                        value={description}
+                        onChange={setDescription}
+                        onStoreImage={storeRichImage}
+                        minRows={8}
+                        placeholder="Опиши задачу, добавь форматирование и кодовые блоки..."
+                      />
+                      <div className="mt-3 flex flex-wrap justify-end gap-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setDescription(task.description ?? '')
+                            setIsEditingDescription(false)
+                          }}
+                          className="rounded-lg border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100"
+                        >
+                          Отменить
+                        </button>
+                        <button
+                          type="button"
+                          disabled={isSavingDescription}
+                          onClick={handleSaveDescription}
+                          className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          {isSavingDescription ? 'Сохраняем...' : 'Сохранить'}
+                        </button>
+                      </div>
+                    </>
+                  ) : description.trim() ? (
+                    <div
+                      className="rich-text-content"
+                      onClick={handleRichTextMediaClick}
+                      dangerouslySetInnerHTML={{
+                        __html: renderRichText(description, {
+                          resolveImage: (id) => meta.richImages[id]?.dataUrl,
+                        }),
+                      }}
                     />
-                    <div className="mt-3 flex flex-wrap justify-end gap-2">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setDescription(task.description ?? '')
-                          setIsEditingDescription(false)
-                        }}
-                        className="rounded-lg border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100"
-                      >
-                        Отменить
-                      </button>
-                      <button
-                        type="button"
-                        disabled={isSavingDescription}
-                        onClick={handleSaveDescription}
-                        className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
-                      >
-                        {isSavingDescription ? 'Сохраняем...' : 'Сохранить'}
-                      </button>
-                    </div>
-                  </>
-                ) : description.trim() ? (
-                  <div
-                    className="rich-text-content"
-                    onClick={handleRichTextMediaClick}
-                    dangerouslySetInnerHTML={{
-                      __html: renderRichText(description, {
-                        resolveImage: (id) => meta.richImages[id]?.dataUrl,
-                      }),
-                    }}
-                  />
-                ) : (
-                  <p className="text-sm text-gray-400">Описание пока не заполнено</p>
+                  ) : (
+                    <p className="text-sm text-gray-400">Описание пока не заполнено</p>
+                  )}
+                </div>
+                {!isEditingDescription && description.trim() && (
+                  <div className="mt-3 flex justify-center border-t border-gray-200 pt-3">
+                    <button
+                      type="button"
+                      onClick={() => setIsDescriptionExpanded((prev) => !prev)}
+                      className="inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-100"
+                    >
+                      <ArrowDownUp size={12} />
+                      {isDescriptionExpanded ? 'Свернуть окно' : 'Развернуть окно'}
+                    </button>
+                  </div>
                 )}
               </div>
 
@@ -1131,6 +1176,41 @@ export function TaskDetailsPage({
       )}
     </div>
   )
+}
+
+function safeDecodeURIComponent(value: string) {
+  try {
+    return decodeURIComponent(value)
+  } catch {
+    return null
+  }
+}
+
+async function copyToClipboard(value: string) {
+  try {
+    if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(value)
+      return true
+    }
+  } catch {
+    // fallback below
+  }
+
+  if (typeof document === 'undefined') return false
+  try {
+    const textarea = document.createElement('textarea')
+    textarea.value = value
+    textarea.setAttribute('readonly', 'true')
+    textarea.style.position = 'fixed'
+    textarea.style.opacity = '0'
+    document.body.appendChild(textarea)
+    textarea.select()
+    const copied = document.execCommand('copy')
+    document.body.removeChild(textarea)
+    return copied
+  } catch {
+    return false
+  }
 }
 
 function parseTaskMeta(raw: string | null | undefined): TaskMeta {

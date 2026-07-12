@@ -200,20 +200,74 @@ body {
 }
 
 .rich-text-code {
-  margin: 0.75rem 0;
+  margin: 0;
   border-radius: 0.75rem;
   background: #111827;
   color: #f3f4f6;
+  position: relative;
   padding: 0.75rem;
+  padding-top: 2.25rem;
   font-size: 0.8125rem;
-  overflow-x: auto;
-  white-space: pre;
+  overflow-x: hidden;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.rich-text-code-wrapper {
+  position: relative;
+  margin: 0.75rem 0;
+}
+
+.rich-text-copy-button {
+  position: absolute;
+  top: 0.4rem;
+  right: 0.4rem;
+  z-index: 1;
+  border: 1px solid rgba(209, 213, 219, 0.35);
+  border-radius: 0.45rem;
+  background: rgba(31, 41, 55, 0.88);
+  color: #e5e7eb;
+  font-size: 0.7rem;
+  line-height: 1;
+  padding: 0.35rem 0.5rem;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.rich-text-copy-button:hover {
+  background: rgba(55, 65, 81, 0.95);
+  color: #ffffff;
+}
+
+.rich-text-code-collapsible {
+  max-height: 220px;
+  overflow: hidden;
+  cursor: pointer;
+}
+
+.rich-text-code-collapsible:not(.rich-text-code-expanded)::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 54px;
+  background: linear-gradient(to bottom, rgba(17, 24, 39, 0), #111827 90%);
+  border-bottom-left-radius: 0.75rem;
+  border-bottom-right-radius: 0.75rem;
+  pointer-events: none;
+}
+
+.rich-text-code-collapsible.rich-text-code-expanded {
+  max-height: none;
+  cursor: auto;
 }
 
 .rich-text-image {
   display: inline-block;
-  width: 120px;
-  height: 90px;
+  width: 320px;
+  max-width: 100%;
+  height: 240px;
   object-fit: cover;
   margin: 0.35rem 0.4rem 0.35rem 0;
   border-radius: 0.75rem;
