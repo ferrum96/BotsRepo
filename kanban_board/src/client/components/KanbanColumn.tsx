@@ -15,7 +15,7 @@ export function KanbanColumn({ column, tasks, onTaskClick, mobile }: KanbanColum
 
   return (
     <div className={`w-full bg-gray-50 rounded-xl flex flex-col border border-gray-200 overflow-hidden ${
-      mobile ? 'h-full' : 'md:flex-1 md:min-w-[240px] md:max-w-[320px] h-full'
+      mobile ? 'h-full' : 'md:flex-1 md:min-w-[300px] md:max-w-[400px] h-full'
     }`}>
       <div className="h-1.5 w-full rounded-t-xl" style={{ backgroundColor: column.color }} />
       <div className="p-3 border-b border-gray-100">
