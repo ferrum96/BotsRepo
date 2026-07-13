@@ -70,6 +70,74 @@ describe('E2E: board workflow', () => {
     expect(taskResponse.status).toBe(201)
     const task = await taskResponse.json() as { id: string }
 
+    const epicResponse = await app.request(`/api/${board.id}/epics`, {
+      method: 'POST',
+      headers: authHeaders,
+      body: JSON.stringify({
+        title: 'E2E Epic',
+        color: '#22C55E',
+      }),
+    })
+    expect(epicResponse.status).toBe(201)
+    const epic = await epicResponse.json() as { id: string; title: string }
+
+    const updateDetailsResponse = await app.request(`/api/tasks/${task.id}`, {
+      method: 'PUT',
+      headers: authHeaders,
+      body: JSON.stringify({
+        title: 'E2E task updated',
+        epicId: epic.id,
+      }),
+    })
+    expect(updateDetailsResponse.status).toBe(200)
+
+    const updatedBoardResponse = await app.request(`/api/boards/${board.id}`, {
+      headers: { Authorization: authHeaders.Authorization },
+    })
+    expect(updatedBoardResponse.status).toBe(200)
+    const updatedBoard = await updatedBoardResponse.json() as {
+      columns: Array<{
+        tasks: Array<{
+          id: string
+          title: string
+          epicId: string | null
+          epic: { id: string; title: string } | null
+        }>
+      }>
+    }
+    const updatedTask = updatedBoard.columns
+      .flatMap((column) => column.tasks)
+      .find((item) => item.id === task.id)
+    expect(updatedTask).toEqual(expect.objectContaining({
+      title: 'E2E task updated',
+      epicId: epic.id,
+      epic: expect.objectContaining({
+        id: epic.id,
+        title: 'E2E Epic',
+      }),
+    }))
+
+    const clearEpicResponse = await app.request(`/api/tasks/${task.id}`, {
+      method: 'PUT',
+      headers: authHeaders,
+      body: JSON.stringify({ epicId: null }),
+    })
+    expect(clearEpicResponse.status).toBe(200)
+
+    const clearedBoardResponse = await app.request(`/api/boards/${board.id}`, {
+      headers: { Authorization: authHeaders.Authorization },
+    })
+    const clearedBoard = await clearedBoardResponse.json() as {
+      columns: Array<{
+        tasks: Array<{ id: string; epicId: string | null; epic: unknown }>
+      }>
+    }
+    const clearedTask = clearedBoard.columns
+      .flatMap((column) => column.tasks)
+      .find((item) => item.id === task.id)
+    expect(clearedTask?.epicId).toBeNull()
+    expect(clearedTask?.epic).toBeNull()
+
     const moveResponse = await app.request(`/api/tasks/${task.id}/move`, {
       method: 'PATCH',
       headers: authHeaders,

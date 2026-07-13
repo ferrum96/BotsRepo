@@ -1,10 +1,11 @@
 import { ChangeEvent, MouseEvent as ReactMouseEvent, useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowDownUp, ArrowLeft, Download, Paperclip, Pencil, Send, Trash2, X } from 'lucide-react'
+import { ArrowDownUp, ArrowLeft, Check, Download, Paperclip, Pencil, Send, Trash2, X } from 'lucide-react'
 import { createPortal } from 'react-dom'
 import { BoardWithDetails, User } from '@/lib/types'
 import { api } from '@/lib/api'
 import { useAuth } from '@/lib/auth'
 import { formatTaskId, getPriorityBadgeColor, getPriorityLabel } from '@/lib/kanban-utils'
+import { resolveDraftAfterTaskSync } from '@/lib/task-details-sync'
 import { safeRandomUUID } from '@/lib/uuid'
 import { RichTextEditor, renderRichText } from './RichTextEditor'
 import { LabelBadge } from './LabelBadge'
@@ -55,8 +56,10 @@ type StoredRichImage = {
 }
 
 type TaskDetailsUpdateInput = {
+  title?: string
   description?: string
   columnId?: string
+  epicId?: string | null
   priority?: string
   assignee?: string | null
   estimatedTime?: string | null
@@ -131,17 +134,22 @@ export function TaskDetailsPage({
   const [isEditingDescription, setIsEditingDescription] = useState(!(task?.description ?? '').trim())
   const [isDescriptionExpanded, setIsDescriptionExpanded] = useState(false)
   const [canExpandDescription, setCanExpandDescription] = useState(false)
+  const [titleDraft, setTitleDraft] = useState(task?.title ?? '')
+  const [isEditingTitle, setIsEditingTitle] = useState(false)
+  const [isSavingTitle, setIsSavingTitle] = useState(false)
+  const [titleError, setTitleError] = useState('')
   const [commentBody, setCommentBody] = useState('')
   const [commentAuthor, setCommentAuthor] = useState(user?.displayName || 'You')
   const [isEditingComment, setIsEditingComment] = useState(false)
   const [openStatusMenu, setOpenStatusMenu] = useState(false)
   const [openPriorityMenu, setOpenPriorityMenu] = useState(false)
   const [openAssigneeMenu, setOpenAssigneeMenu] = useState(false)
+  const [openEpicMenu, setOpenEpicMenu] = useState(false)
   const [assigneeQuery, setAssigneeQuery] = useState('')
   const [estimatedTimeDraft, setEstimatedTimeDraft] = useState(task?.estimatedTime ?? '')
   const [estimatedTimeError, setEstimatedTimeError] = useState('')
   const [isEditingEstimate, setIsEditingEstimate] = useState(false)
-  const [savingField, setSavingField] = useState<null | 'status' | 'priority' | 'assignee' | 'estimate'>(null)
+  const [savingField, setSavingField] = useState<null | 'status' | 'priority' | 'assignee' | 'estimate' | 'epic'>(null)
   const [meta, setMeta] = useState<TaskMeta>(EMPTY_META)
   const [attachmentError, setAttachmentError] = useState('')
   const [isAddingActualTime, setIsAddingActualTime] = useState(false)
@@ -152,6 +160,7 @@ export function TaskDetailsPage({
   const [users, setUsers] = useState<User[]>([])
   const detailsPanelRef = useRef<HTMLDivElement>(null)
   const descriptionPreviewRef = useRef<HTMLDivElement>(null)
+  const titleIgnoreBlurRef = useRef(false)
 
   useEffect(() => {
     if (user?.displayName) setCommentAuthor(user.displayName)
@@ -165,22 +174,56 @@ export function TaskDetailsPage({
 
   useEffect(() => {
     if (!task) return
+
     setDescription(task.description ?? '')
     setIsEditingDescription(!(task.description ?? '').trim())
     setIsDescriptionExpanded(false)
     setCanExpandDescription(false)
+    setTitleDraft(task.title)
+    setIsEditingTitle(false)
+    setTitleError('')
     setEstimatedTimeDraft(task.estimatedTime ?? '')
     setIsEditingEstimate(false)
     setOpenStatusMenu(false)
     setOpenPriorityMenu(false)
     setOpenAssigneeMenu(false)
+    setOpenEpicMenu(false)
     setAssigneeQuery('')
     setEstimatedTimeError('')
     setIsAddingActualTime(false)
     setActualDurationDraft('')
     setActualDateDraft(DEFAULT_ACTUAL_DATE())
     setActualTimeError('')
-  }, [task])
+  }, [task?.id])
+
+  useEffect(() => {
+    if (!task) return
+
+    setDescription(
+      resolveDraftAfterTaskSync({
+        isEditing: isEditingDescription,
+        localValue: description,
+        serverValue: task.description ?? '',
+      })
+    )
+    setTitleDraft(
+      resolveDraftAfterTaskSync({
+        isEditing: isEditingTitle,
+        localValue: titleDraft,
+        serverValue: task.title,
+      })
+    )
+    if (!isEditingTitle) setTitleError('')
+
+    setEstimatedTimeDraft(
+      resolveDraftAfterTaskSync({
+        isEditing: isEditingEstimate,
+        localValue: estimatedTimeDraft,
+        serverValue: task.estimatedTime ?? '',
+      })
+    )
+    if (!isEditingEstimate) setEstimatedTimeError('')
+  }, [task, isEditingDescription, isEditingTitle, isEditingEstimate])
 
   useEffect(() => {
     if (isEditingDescription || !description.trim()) {
@@ -219,6 +262,7 @@ export function TaskDetailsPage({
         setOpenStatusMenu(false)
         setOpenPriorityMenu(false)
         setOpenAssigneeMenu(false)
+        setOpenEpicMenu(false)
       }
 
       if (!insideDetailsPanel) {
@@ -299,6 +343,33 @@ export function TaskDetailsPage({
     }
   }
 
+  const handleSaveTitle = async () => {
+    if (!task) return
+    const nextTitle = titleDraft.trim()
+    if (!nextTitle) {
+      titleIgnoreBlurRef.current = false
+      setTitleError('Название не может быть пустым')
+      return
+    }
+    if (nextTitle === task.title) {
+      titleIgnoreBlurRef.current = false
+      setIsEditingTitle(false)
+      setTitleError('')
+      return
+    }
+    setIsSavingTitle(true)
+    try {
+      await onUpdateTask(task.id, { title: nextTitle })
+      titleIgnoreBlurRef.current = false
+      setIsEditingTitle(false)
+      setTitleError('')
+    } catch {
+      titleIgnoreBlurRef.current = false
+    } finally {
+      setIsSavingTitle(false)
+    }
+  }
+
   const handleAddComment = () => {
     if (!task || !commentBody.trim()) return
     const nextComment: TaskComment = {
@@ -316,7 +387,7 @@ export function TaskDetailsPage({
   }
 
   const updateTaskField = async (
-    field: 'status' | 'priority' | 'assignee' | 'estimate',
+    field: 'status' | 'priority' | 'assignee' | 'estimate' | 'epic',
     data: TaskDetailsUpdateInput
   ) => {
     if (!task) return
@@ -574,8 +645,8 @@ export function TaskDetailsPage({
   }
 
   return (
-    <div className="flex-1 min-h-full overflow-y-auto bg-gray-50 p-3 sm:p-4 md:p-6">
-      <div className="mx-auto flex min-h-full max-w-6xl flex-col">
+    <div className="flex-1 min-h-full overflow-x-hidden overflow-y-auto bg-gray-50 p-3 sm:p-4 md:p-6">
+      <div className="mx-auto flex min-h-full w-full min-w-0 max-w-6xl flex-col">
         <div className="mb-3 flex justify-end sm:mb-4 sm:justify-start">
           <button
             type="button"
@@ -587,13 +658,83 @@ export function TaskDetailsPage({
           </button>
         </div>
 
-        <div className="grid flex-1 gap-3 sm:gap-4 lg:grid-cols-[1fr_300px] lg:items-stretch">
-          <section className="order-2 h-full space-y-4 rounded-xl border border-gray-200 bg-white p-3 sm:p-4 md:p-6 lg:order-1">
+        <div className="grid min-w-0 flex-1 gap-3 sm:gap-4 lg:grid-cols-[1fr_300px] lg:items-stretch">
+          <section className="order-2 h-full min-w-0 space-y-4 overflow-hidden rounded-xl border border-gray-200 bg-white p-3 sm:p-4 md:p-6 lg:order-1">
             <div>
               <div className="mb-2 text-xs uppercase tracking-wide text-gray-400">
                 {formatTaskId(task.taskNumber)}
               </div>
-              <h1 className="text-xl font-bold text-gray-900 sm:text-2xl">{task.title}</h1>
+              {isEditingTitle ? (
+                <div>
+                  <div className="flex items-center gap-2">
+                    <input
+                      autoFocus
+                      value={titleDraft}
+                      onChange={(event) => {
+                        setTitleDraft(event.target.value)
+                        if (titleError) setTitleError('')
+                      }}
+                      onBlur={() => {
+                        if (titleIgnoreBlurRef.current) {
+                          titleIgnoreBlurRef.current = false
+                          return
+                        }
+                        setTitleDraft(task.title)
+                        setTitleError('')
+                        setIsEditingTitle(false)
+                      }}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter') {
+                          event.preventDefault()
+                          titleIgnoreBlurRef.current = true
+                          void handleSaveTitle()
+                        }
+                        if (event.key === 'Escape') {
+                          event.preventDefault()
+                          titleIgnoreBlurRef.current = false
+                          setTitleDraft(task.title)
+                          setTitleError('')
+                          setIsEditingTitle(false)
+                        }
+                      }}
+                      className={`min-w-0 flex-1 rounded-lg border px-2 py-1.5 text-xl font-bold text-gray-900 outline-none sm:text-2xl ${
+                        titleError ? 'border-red-400 focus:border-red-500' : 'border-gray-200 focus:border-blue-400'
+                      }`}
+                    />
+                    <button
+                      type="button"
+                      disabled={isSavingTitle}
+                      title="Сохранить"
+                      onMouseDown={(event) => {
+                        event.preventDefault()
+                        titleIgnoreBlurRef.current = true
+                      }}
+                      onClick={() => void handleSaveTitle()}
+                      className="inline-flex shrink-0 items-center justify-center rounded-lg p-1.5 text-green-600 hover:bg-green-50 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      <Check size={18} />
+                    </button>
+                  </div>
+                  {titleError && <p className="mt-1 px-2 text-xs text-red-500">{titleError}</p>}
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => {
+                    titleIgnoreBlurRef.current = false
+                    setTitleDraft(task.title)
+                    setTitleError('')
+                    setIsEditingTitle(true)
+                  }}
+                  className="group flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left outline-none hover:bg-gray-50 focus-visible:ring-2 focus-visible:ring-blue-400"
+                >
+                  <h1 className="min-w-0 flex-1 text-xl font-bold text-gray-900 sm:text-2xl">{task.title}</h1>
+                  <Pencil
+                    size={16}
+                    className="shrink-0 text-gray-400 opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100"
+                  />
+                </button>
+              )}
             </div>
 
             <div>
@@ -835,12 +976,12 @@ export function TaskDetailsPage({
             </div>
           </section>
 
-          <aside className="order-1 h-full space-y-4 rounded-xl border border-gray-200 bg-white p-3 sm:p-4 lg:order-2">
+          <aside className="order-1 h-full min-w-0 space-y-4 overflow-hidden rounded-xl border border-gray-200 bg-white p-3 sm:p-4 lg:order-2">
             <h2 className="text-sm font-semibold text-gray-700">Детали</h2>
 
-            <div ref={detailsPanelRef} className="space-y-3 text-sm text-gray-600">
-              <div className="relative flex items-center justify-between gap-3 py-1.5">
-                <span>Статус</span>
+            <div ref={detailsPanelRef} className="min-w-0 space-y-3 text-sm text-gray-600">
+              <div className="relative flex w-full min-w-0 items-center justify-between gap-3 py-1.5">
+                <span className="shrink-0">Статус</span>
                 <button
                   type="button"
                   disabled={savingField === 'status'}
@@ -848,14 +989,15 @@ export function TaskDetailsPage({
                     setOpenStatusMenu((prev) => !prev)
                     setOpenPriorityMenu(false)
                     setOpenAssigneeMenu(false)
+                    setOpenEpicMenu(false)
                   }}
-                  className="inline-flex cursor-pointer items-center rounded-full px-2.5 py-1 text-xs font-semibold hover:shadow-sm disabled:cursor-not-allowed disabled:opacity-60"
+                  className="min-w-0 max-w-full cursor-pointer overflow-hidden rounded-full px-2.5 py-1 text-xs font-semibold hover:shadow-sm disabled:cursor-not-allowed disabled:opacity-60"
                   style={{
                     color: taskColumn?.color ?? '#111827',
                     backgroundColor: `${taskColumn?.color ?? '#6B7280'}22`,
                   }}
                 >
-                  {taskColumn?.title ?? '—'}
+                  <span className="block truncate">{taskColumn?.title ?? '—'}</span>
                 </button>
                 {openStatusMenu && (
                   <div
@@ -884,8 +1026,8 @@ export function TaskDetailsPage({
                 )}
               </div>
 
-              <div className="relative flex items-center justify-between gap-3 py-1.5">
-                <span>Приоритет</span>
+              <div className="relative flex w-full items-center justify-between gap-3 py-2">
+                <span className="shrink-0">Приоритет</span>
                 <button
                   type="button"
                   disabled={savingField === 'priority'}
@@ -893,8 +1035,9 @@ export function TaskDetailsPage({
                     setOpenPriorityMenu((prev) => !prev)
                     setOpenStatusMenu(false)
                     setOpenAssigneeMenu(false)
+                    setOpenEpicMenu(false)
                   }}
-                  className="inline-flex cursor-pointer items-center rounded-full px-2 py-1 hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
+                  className="inline-flex cursor-pointer items-center rounded-full hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${getPriorityBadgeColor(task.priority)}`}>
                     {getPriorityLabel(task.priority)}
@@ -926,8 +1069,85 @@ export function TaskDetailsPage({
                 )}
               </div>
 
-              <div className="relative flex items-center justify-between gap-3 py-1.5">
-                <span>Исполнитель</span>
+              <div className="relative flex w-full min-w-0 items-center justify-between gap-3 py-2">
+                <span className="shrink-0">Эпик</span>
+                <button
+                  type="button"
+                  disabled={savingField === 'epic'}
+                  onClick={() => {
+                    setOpenEpicMenu((prev) => !prev)
+                    setOpenStatusMenu(false)
+                    setOpenPriorityMenu(false)
+                    setOpenAssigneeMenu(false)
+                  }}
+                  className={`min-w-0 max-w-full cursor-pointer overflow-hidden disabled:cursor-not-allowed disabled:opacity-60 ${
+                    task.epic
+                      ? 'rounded-full px-2.5 p-1 text-xs font-medium hover:opacity-90'
+                      : 'rounded-md p-1 text-right text-sm hover:bg-gray-100'
+                  }`}
+                  style={
+                    task.epic
+                      ? {
+                          color: task.epic.color,
+                          backgroundColor: `${task.epic.color}20`,
+                        }
+                      : undefined
+                  }
+                >
+                  {task.epic ? (
+                    <span className="block truncate">{task.epic.title}</span>
+                  ) : (
+                    <span className="truncate text-gray-500">Без эпика</span>
+                  )}
+                </button>
+                {openEpicMenu && (
+                  <div
+                    data-details-dropdown
+                    className="absolute right-0 top-[calc(100%+4px)] z-20 w-[min(86vw,240px)] rounded-lg border border-gray-200 bg-white p-1 shadow-lg"
+                  >
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        setOpenEpicMenu(false)
+                        await updateTaskField('epic', { epicId: null })
+                      }}
+                      className={`mb-1 block w-full cursor-pointer rounded-md px-2 py-1.5 text-left text-sm hover:bg-gray-100 ${
+                        !task.epicId ? 'bg-gray-100 text-gray-900' : 'text-gray-700'
+                      }`}
+                    >
+                      Без эпика
+                    </button>
+                    {board.epics.length > 0 ? (
+                      <div className="max-h-44 overflow-y-auto">
+                        {board.epics.map((epic) => (
+                          <button
+                            key={epic.id}
+                            type="button"
+                            onClick={async () => {
+                              setOpenEpicMenu(false)
+                              await updateTaskField('epic', { epicId: epic.id })
+                            }}
+                            className={`flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-gray-100 ${
+                              task.epicId === epic.id ? 'bg-gray-100 text-gray-900' : 'text-gray-700'
+                            }`}
+                          >
+                            <span
+                              className="h-2.5 w-2.5 shrink-0 rounded-full"
+                              style={{ backgroundColor: epic.color }}
+                            />
+                            <span className="truncate">{epic.title}</span>
+                          </button>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="px-2 py-1 text-xs text-gray-400">Эпики не созданы</p>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              <div className="relative flex w-full min-w-0 items-center justify-between gap-3 py-2">
+                <span className="shrink-0">Исполнитель</span>
                 <button
                   type="button"
                   disabled={savingField === 'assignee'}
@@ -935,11 +1155,16 @@ export function TaskDetailsPage({
                     setOpenAssigneeMenu((prev) => !prev)
                     setOpenPriorityMenu(false)
                     setOpenStatusMenu(false)
+                    setOpenEpicMenu(false)
                     setAssigneeQuery('')
                   }}
-                  className="inline-flex cursor-pointer items-center rounded-md px-2 py-1 font-medium text-gray-900 hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-60"
+                  className="inline-flex min-w-0 max-w-full cursor-pointer items-center overflow-hidden rounded-md p-1 text-right font-medium text-gray-900 hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-60"
                 >
-                  {task.assignee || 'Не назначен'}
+                  {task.assignee ? (
+                    <span className="min-w-0 truncate">{task.assignee}</span>
+                  ) : (
+                    <span className="truncate text-gray-500">Не назначен</span>
+                  )}
                 </button>
                 {openAssigneeMenu && (
                   <div
@@ -989,9 +1214,9 @@ export function TaskDetailsPage({
                 )}
               </div>
 
-              <div className="py-1.5">
-                <div className="flex items-center justify-between gap-3">
-                  <span>Оценка</span>
+              <div className="py-2">
+                <div className="flex w-full items-center justify-between gap-3">
+                  <span className="shrink-0">Оценка</span>
                   {isEditingEstimate ? (
                     <div className="flex flex-wrap items-center justify-end gap-2">
                       <input
@@ -1057,16 +1282,16 @@ export function TaskDetailsPage({
                 )}
               </div>
 
-              <div className="rounded-lg border border-gray-200 bg-gray-50 p-3">
-                <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-                  <span className="font-medium text-gray-700">Фактические затраты</span>
+              <div className="mt-4 min-w-0 rounded-lg border border-gray-200 bg-gray-50 p-3">
+                <div className="mb-2 flex min-w-0 flex-wrap items-center justify-between gap-2">
+                  <span className="min-w-0 font-medium text-gray-700">Фактические затраты</span>
                   <button
                     type="button"
                     onClick={() => {
                       setIsAddingActualTime((prev) => !prev)
                       setActualTimeError('')
                     }}
-                    className="rounded-md border border-gray-200 bg-white px-2.5 py-1 text-xs font-medium text-gray-700 hover:bg-gray-100"
+                    className="shrink-0 rounded-md border border-gray-200 bg-white px-2.5 py-1 text-xs font-medium text-gray-700 hover:bg-gray-100"
                   >
                     {isAddingActualTime ? 'Скрыть' : 'Списать время'}
                   </button>

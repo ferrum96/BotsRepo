@@ -8,6 +8,7 @@ import { api } from './lib/api'
 import { useAuth } from './lib/auth'
 import { formatTaskId, reorderTasksInBoard } from './lib/kanban-utils'
 import { buildBoardPath, looksLikeUuid, normalizeTaskRouteRef, resolveBoardIdFromRoute } from './lib/routes'
+import { shouldSilentBoardRefetch, shouldSkipBoardRefetch } from './lib/task-details-sync'
 import { Board, BoardWithDetails } from './lib/types'
 
 const STORAGE_KEY = 'kanban-selected-board'
@@ -176,10 +177,10 @@ export default function App() {
             onBack={() => navigate(buildBoardPath(board))}
             onUpdateTask={async (id, data) => {
               await api.tasks.update(id, data)
-              // Avoid full board refetch for metadata-only updates (e.g. inline image insert),
-              // otherwise the details form state gets reset while user is editing.
-              if (Object.keys(data).length === 1 && 'meta' in data) return
-              await fetchBoard()
+              if (shouldSkipBoardRefetch(data)) return
+              if (shouldSilentBoardRefetch(data)) {
+                await fetchBoard({ silent: true })
+              }
             }}
           />
         ) : board ? (
