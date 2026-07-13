@@ -20,6 +20,17 @@ describe('API integration', () => {
     await expect(response.json()).resolves.toEqual({ error: 'Unauthorized' })
   })
 
+  it('rejects unauthenticated board creation', async () => {
+    const response = await app.request('/api/boards', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: 'No Token Board' }),
+    })
+
+    expect(response.status).toBe(401)
+    await expect(response.json()).resolves.toEqual({ error: 'Unauthorized' })
+  })
+
   it('creates board with default columns and returns board details', async () => {
     const token = await createToken({
       id: 'u1',

@@ -63,6 +63,10 @@ caddy/certs/*.key
 credentials.json
 service-account*.json
 
+# Caveman / Cursor agent skills
+.agents/
+skills-lock.json
+
 # Misc
 .vercel
 nginx-local.conf

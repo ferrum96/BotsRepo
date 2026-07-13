@@ -22,6 +22,31 @@ describe('Auth security', () => {
     await expect(response.json()).resolves.toEqual({ error: 'Unauthorized' })
   })
 
+  it('rejects board creation without Authorization', async () => {
+    const response = await app.request('/api/boards', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: 'Unauthorized Board' }),
+    })
+
+    expect(response.status).toBe(401)
+    await expect(response.json()).resolves.toEqual({ error: 'Unauthorized' })
+  })
+
+  it('rejects board creation with malformed bearer token', async () => {
+    const response = await app.request('/api/boards', {
+      method: 'POST',
+      headers: {
+        Authorization: 'Bearer not-a-valid-jwt',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ name: 'Unauthorized Board' }),
+    })
+
+    expect(response.status).toBe(401)
+    await expect(response.json()).resolves.toEqual({ error: 'Unauthorized' })
+  })
+
   it('does not authenticate SQL injection payloads', async () => {
     await createTestUser({ username: 'secure-user', password: 'safe-password' })
 

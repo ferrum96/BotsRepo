@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { X } from 'lucide-react'
+import { api } from '../lib/api'
 
 type CreateBoardModalProps = {
   onClose: () => void
@@ -9,22 +10,19 @@ type CreateBoardModalProps = {
 export function CreateBoardModal({ onClose, onCreated }: CreateBoardModalProps) {
   const [name, setName] = useState('')
   const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!name.trim()) return
 
     setLoading(true)
+    setError(null)
     try {
-      const response = await fetch('/api/boards', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: name.trim() }),
-      })
-
-      if (response.ok) {
-        onCreated()
-      }
+      await api.boards.create({ name: name.trim() })
+      onCreated()
+    } catch {
+      setError('Не удалось создать доску')
     } finally {
       setLoading(false)
     }
@@ -49,6 +47,8 @@ export function CreateBoardModal({ onClose, onCreated }: CreateBoardModalProps) 
             className="w-full px-3 py-2 border rounded-lg mb-4 focus:outline-none focus:ring-2 focus:ring-blue-500"
             autoFocus
           />
+
+          {error && <p className="text-sm text-red-600 mb-4">{error}</p>}
 
           <div className="flex justify-end gap-2">
             <button
