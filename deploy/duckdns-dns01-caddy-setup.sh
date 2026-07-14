@@ -204,6 +204,9 @@ PORT_FKANDU_DASHBOARD=3000
 PORT_FKANDU_API=8000
 PORT_FKANDU_BOT_FILES=8088
 PORT_PUBG_API=8080
+PORT_DEPLOY_WEBHOOK=9000
+DEPLOY_WEBHOOK_PATH="/hooks/deploy"
+PORT_DEPLOY_WEBHOOK_PUBLIC=450
 
 # Optional domains from deploy/domains.env
 GATEWAY_DOMAIN=""
@@ -340,6 +343,9 @@ if [[ -n "${SINGLE_UPSTREAM}" ]]; then
   write_route "root" "/" "127.0.0.1:${SINGLE_UPSTREAM}"
 fi
 
+# Always expose deploy webhook on HTTPS gateway (GitHub cannot use closed :449 after ufw).
+write_route "deploy-webhook" "${DEPLOY_WEBHOOK_PATH}" "127.0.0.1:${PORT_DEPLOY_WEBHOOK}"
+
 if [[ "${SKIP_DEFAULT_ROUTES}" = "0" ]]; then
   if should_add_gateway_path "${SERVICE_DOMAIN_KANBAN}"; then
     write_route "kanban" "/kanban" "127.0.0.1:${PORT_KANBAN}"
@@ -411,6 +417,8 @@ if [[ "${SKIP_FIREWALL}" = "0" ]]; then
   run ufw allow OpenSSH
   run ufw allow 80/tcp
   run ufw allow 443/tcp
+  # HTTP deploy webhook (nginx); without this GitHub gets "failed to connect"
+  run ufw allow "${PORT_DEPLOY_WEBHOOK_PUBLIC:-450}/tcp"
   run ufw --force enable
 fi
 
@@ -423,6 +431,7 @@ curl -I --max-time 20 "https://${GATEWAY_DOMAIN}" || true
 echo
 echo "Done."
 echo "Gateway domain: https://${GATEWAY_DOMAIN}"
+echo "GitHub deploy webhook URL: https://${GATEWAY_DOMAIN}${DEPLOY_WEBHOOK_PATH}"
 if [[ -n "${SERVICE_DOMAIN_KANBAN}" ]]; then
   echo "Kanban domain: https://${SERVICE_DOMAIN_KANBAN}"
 fi

@@ -277,6 +277,65 @@ install_nginx_config() {
   fi
 }
 
+ensure_ufw_deploy_webhook_port() {
+  local port="${PORT_DEPLOY_WEBHOOK_PUBLIC:-450}"
+
+  if ! command -v ufw >/dev/null 2>&1; then
+    echo "UFW: не найден — пропуск allow ${port}/tcp"
+    return
+  fi
+  if ! ufw status 2>/dev/null | grep -qi "Status: active"; then
+    echo "UFW: не активен — пропуск allow ${port}/tcp"
+    return
+  fi
+  if ufw status | grep -E "^${port}(/tcp)?[[:space:]]+ALLOW" >/dev/null 2>&1; then
+    echo "UFW: ${port}/tcp уже открыт (deploy webhook)"
+    return
+  fi
+
+  echo "UFW: открываю ${port}/tcp для deploy webhook"
+  ufw allow "${port}/tcp"
+}
+
+ensure_caddy_deploy_webhook_route() {
+  local routes_dir="/etc/caddy/routes"
+  local caddyfile="/etc/caddy/Caddyfile"
+  local route_file="${routes_dir}/deploy-webhook.caddy"
+  local port="${PORT_DEPLOY_WEBHOOK:-9000}"
+  local path="${DEPLOY_WEBHOOK_PATH:-/hooks/deploy}"
+  local expected="reverse_proxy 127.0.0.1:${port}"
+
+  if ! command -v caddy >/dev/null 2>&1; then
+    echo "Caddy: не найден — пропуск deploy-webhook route"
+    return
+  fi
+  if [ ! -f "${caddyfile}" ]; then
+    echo "Caddy: ${caddyfile} нет — пропуск deploy-webhook route"
+    return
+  fi
+  if ! systemctl is-active --quiet caddy 2>/dev/null; then
+    echo "Caddy: не запущен — пропуск deploy-webhook route"
+    return
+  fi
+
+  if [ -f "${route_file}" ] && grep -Fq "${expected}" "${route_file}"; then
+    echo "Caddy: deploy-webhook route актуален (${path} → 127.0.0.1:${port})"
+    return
+  fi
+
+  echo "Caddy: добавляю deploy-webhook route ${path} → 127.0.0.1:${port}"
+  mkdir -p "${routes_dir}"
+  cat > "${route_file}" <<EOF
+# deploy-webhook
+handle_path ${path}* {
+    reverse_proxy 127.0.0.1:${port}
+}
+EOF
+  caddy validate --config "${caddyfile}"
+  systemctl reload caddy
+  echo "Caddy: deploy-webhook route готов"
+}
+
 verify_pubg_api() {
   local port="${PORT_PUBG_API:-8080}"
   echo "Проверка pubg-api на :${port}..."
@@ -406,6 +465,8 @@ restart_services
 
 install_nginx_config
 reload_nginx
+ensure_ufw_deploy_webhook_port
+ensure_caddy_deploy_webhook_route
 
 if should_restart_pubg_api; then
   verify_pubg_api || true
@@ -415,7 +476,8 @@ fi
 
 echo ""
 echo "=== Деплой завершен ==="
-echo "Порты: fkandu :444/:445/:446 | pubg :447 (→:${PORT_PUBG_API:-8080}) | kanban :448 (→:${PORT_KANBAN:-3002}) | webhook :449 (→:${PORT_DEPLOY_WEBHOOK:-9000})"
+echo "Порты: fkandu :444/:445/:446 | pubg :447 (→:${PORT_PUBG_API:-8080}) | kanban :448 (→:${PORT_KANBAN:-3002}) | webhook :${PORT_DEPLOY_WEBHOOK_PUBLIC:-450} (→:${PORT_DEPLOY_WEBHOOK:-9000})"
+echo "GitHub webhook (HTTP): http://IP:${PORT_DEPLOY_WEBHOOK_PUBLIC:-450}/  | HTTPS: https://GATEWAY${DEPLOY_WEBHOOK_PATH:-/hooks/deploy}"
 if [ ${#RESTART_SERVICES[@]} -gt 0 ]; then
   systemctl status "${RESTART_SERVICES[@]}" --no-pager
 else

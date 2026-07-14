@@ -13,7 +13,7 @@ deploy/
 ├── domains.env.example    # переменные доменов для Caddy
 ├── webhook.env.example    # шаблон secret для webhook
 ├── nginx/
-│   └── nginx-systemd.conf # nginx для VPS (порты 444–449)
+│   └── nginx-systemd.conf # nginx для VPS (порты 444–448, 450)
 ├── systemd/               # unit-файлы → /etc/systemd/system/
 └── DEPLOY.md              # эта документация
 ```
@@ -22,14 +22,15 @@ deploy/
 
 ```
                          ┌──────────────────────────────────────────┐
-  http://IP:444–449      │  nginx (deploy/nginx/nginx-systemd.conf) │
+  http://IP:444–448,450 │  nginx (deploy/nginx/nginx-systemd.conf) │
                          └────────────────────┬─────────────────────┘
                                               │ 127.0.0.1
          ┌────────────────────────────────────┼────────────────────────────┐
          ▼                                    ▼                            ▼
    fkandu :3000                       pubg-api :8080                 kanban :3002
    fkandu-api :8000                   pubg-bot                       deploy-webhook :9000
-   fkandu-bot :8088                   (GitHub → :449 → webhook)
+   fkandu-bot :8088                   (GitHub → :450 → webhook)
+                                          (опционально: Caddy /hooks/deploy)
 ```
 
 **Не запускайте на сервере:**
@@ -47,7 +48,8 @@ deploy/
 | **446** | fkandu-bot (файлы) | **8088** |
 | **447** | PUBG dashboard + API | **8080** |
 | **448** | kanban | **3002** *(3000 занят fkandu)* |
-| **449** | GitHub deploy webhook | **9000** |
+| **450** | GitHub webhook (nginx HTTP) | **9000** |
+| **443** `/hooks/deploy` | GitHub webhook (Caddy HTTPS, опционально) | **9000** |
 
 ## Первичная настройка сервера
 
@@ -74,11 +76,23 @@ Unit-файлы из `deploy/systemd/` **`deploy/deploy.sh` копирует в 
 
 1. Заполните `deploy/webhook.env` — `WEBHOOK_SECRET` должен совпадать с secret в GitHub.
 2. Убедитесь, что сервис запущен: `systemctl status deploy-webhook`.
-3. В GitHub → Settings → Webhooks создайте webhook:
-   - **Payload URL:** `http://ВАШ_IP:449/`
+3. В GitHub → Settings → Webhooks:
+   - **Payload URL:** `http://ВАШ_IP:450/`
    - **Content type:** `application/json`
    - **Secret:** тот же, что в `deploy/webhook.env`
    - **Events:** `Push` и `Pull requests`
+
+Пример: `http://2.26.249.118:450/`
+
+`deploy.sh` открывает `:450` в ufw и ставит nginx-listen. Вручную:
+
+```bash
+ufw allow 450/tcp
+ufw reload
+systemctl reload nginx
+```
+
+Опционально HTTPS через Caddy: `https://ВАШ_GATEWAY_DOMAIN/hooks/deploy`
 
 Деплой запускается при:
 - merge pull request в default branch (`main`);
@@ -90,13 +104,22 @@ Unit-файлы из `deploy/systemd/` **`deploy/deploy.sh` копирует в 
 Проверка ping:
 
 ```bash
-curl -i -X POST http://127.0.0.1:449/ \
+curl -i -X POST http://127.0.0.1:450/ \
   -H "X-GitHub-Event: ping" \
   -H "Content-Type: application/json" \
   -d '{}'
 ```
 
-## Деплой обновлений
+Снаружи:
+
+```bash
+curl -i -X POST http://ВАШ_IP:450/ \
+  -H "X-GitHub-Event: ping" \
+  -H "Content-Type: application/json" \
+  -d '{}'
+```
+
+Если `WEBHOOK_SECRET` не `changeme`, без подписи ответ будет `403 Invalid signature` — это нормально (порт живой).## Деплой обновлений
 
 ```bash
 ./deploy/deploy.sh
@@ -142,12 +165,13 @@ systemctl restart pubg-api
 
 | URL | Описание |
 |-----|----------|
-| http://IP:444 | FKandu dashboard |
-| http://IP:445 | FKandu API |
-| http://IP:446 | FKandu файлы |
-| http://IP:447 | PUBG clan dashboard |
-| http://IP:448 | Kanban |
-| http://IP:449/ | GitHub deploy webhook (POST) |
+| http://IP:444 | FKandu dashboard (legacy nginx) |
+| http://IP:445 | FKandu API (legacy nginx) |
+| http://IP:446 | FKandu файлы (legacy nginx) |
+| http://IP:447 | PUBG clan dashboard (legacy nginx) |
+| http://IP:448 | Kanban (legacy nginx) |
+| http://IP:450/ | GitHub deploy webhook (HTTP, нужен `ufw allow 450`) |
+| https://GATEWAY/hooks/deploy | GitHub deploy webhook (HTTPS, опционально) |
 
 ## HTTPS через DuckDNS + Caddy
 
@@ -155,6 +179,7 @@ systemctl restart pubg-api
 Режим рассчитан на **статический IP** (без duckdns updater-сервисов).
 
 Текущие целевые URL:
+- `https://fkandu.duckdns.org/hooks/deploy` (GitHub webhook)
 - `https://fkandu.duckdns.org/dashboard`
 - `https://fkandu.duckdns.org/api`
 - `https://fkandu.duckdns.org/files`
@@ -181,6 +206,7 @@ nano deploy/domains.env
 - настраивает `Caddy` как HTTPS gateway с path-based роутингом;
 - читает `deploy/domains.env` (если есть) и создает host-based домены сервисов;
 - создает базовые маршруты для текущих сервисов:
+  - `/hooks/deploy` -> `127.0.0.1:9000` (GitHub deploy webhook)
   - `/kanban` -> `127.0.0.1:3002`
   - `/dashboard` -> `127.0.0.1:3000`
   - `/api` -> `127.0.0.1:8000`

@@ -84,4 +84,4 @@ docker compose -f docker-compose.dev.yml up --build
 
 Полная карта: `deploy/ports.env`.
 
-Production webhook (только VPS): `http://IP:449/` → `127.0.0.1:9000`.
+Production webhook (только VPS): `http://IP:450/` → `127.0.0.1:9000` (опционально HTTPS: `https://GATEWAY/hooks/deploy`).
