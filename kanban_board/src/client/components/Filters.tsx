@@ -57,7 +57,7 @@ export function Filters({ epics, assignees, filters, onFilterChange }: FiltersPr
             epicId: e.target.value || undefined,
           })
         }
-        className="w-36 max-w-full px-3 py-1 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+        className="min-w-36 w-auto px-3 py-1 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
       >
         <option value="">Все эпики</option>
         {epics.map((epic) => (
@@ -75,7 +75,7 @@ export function Filters({ epics, assignees, filters, onFilterChange }: FiltersPr
             assignee: e.target.value || undefined,
           })
         }
-        className="w-36 max-w-full px-3 py-1 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+        className="min-w-[11.5rem] w-auto px-3 py-1 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
       >
         <option value="">Все исполнители</option>
         {assignees.map((assignee) => (

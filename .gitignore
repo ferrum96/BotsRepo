@@ -65,6 +65,7 @@ service-account*.json
 
 # Caveman / Cursor agent skills
 .agents/
+.cursor/
 skills-lock.json
 
 # Misc

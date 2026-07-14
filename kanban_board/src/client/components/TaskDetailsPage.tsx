@@ -7,6 +7,12 @@ import { useAuth } from '@/lib/auth'
 import { formatTaskId, getPriorityBadgeColor, getPriorityLabel } from '@/lib/kanban-utils'
 import { resolveDraftAfterTaskSync } from '@/lib/task-details-sync'
 import { safeRandomUUID } from '@/lib/uuid'
+import {
+  addTaskComment,
+  deleteTaskComment,
+  updateTaskComment,
+  type TaskComment,
+} from '@/lib/task-comments'
 import { RichTextEditor, renderRichText } from './RichTextEditor'
 import { LabelBadge } from './LabelBadge'
 
@@ -15,13 +21,6 @@ type TaskDetailsPageProps = {
   taskId: string
   onBack: () => void
   onUpdateTask: (taskId: string, data: TaskDetailsUpdateInput) => Promise<void>
-}
-
-type TaskComment = {
-  id: string
-  body: string
-  author: string
-  createdAt: string
 }
 
 type TaskAttachment = {
@@ -141,6 +140,8 @@ export function TaskDetailsPage({
   const [commentBody, setCommentBody] = useState('')
   const [commentAuthor, setCommentAuthor] = useState(user?.displayName || 'You')
   const [isEditingComment, setIsEditingComment] = useState(false)
+  const [editingCommentId, setEditingCommentId] = useState<string | null>(null)
+  const [editCommentBody, setEditCommentBody] = useState('')
   const [openStatusMenu, setOpenStatusMenu] = useState(false)
   const [openPriorityMenu, setOpenPriorityMenu] = useState(false)
   const [openAssigneeMenu, setOpenAssigneeMenu] = useState(false)
@@ -194,6 +195,10 @@ export function TaskDetailsPage({
     setActualDurationDraft('')
     setActualDateDraft(DEFAULT_ACTUAL_DATE())
     setActualTimeError('')
+    setIsEditingComment(false)
+    setCommentBody('')
+    setEditingCommentId(null)
+    setEditCommentBody('')
   }, [task?.id])
 
   useEffect(() => {
@@ -371,19 +376,54 @@ export function TaskDetailsPage({
   }
 
   const handleAddComment = () => {
-    if (!task || !commentBody.trim()) return
-    const nextComment: TaskComment = {
+    if (!task) return
+    const nextComments = addTaskComment(meta.comments, {
       id: safeRandomUUID(),
-      body: commentBody.trim(),
-      author: commentAuthor.trim() || 'You',
-      createdAt: new Date().toISOString(),
-    }
+      body: commentBody,
+      author: commentAuthor,
+    })
+    if (!nextComments) return
     saveMeta({
       ...meta,
-      comments: [nextComment, ...meta.comments],
+      comments: nextComments,
     })
     setCommentBody('')
     setIsEditingComment(false)
+  }
+
+  const handleStartEditComment = (comment: TaskComment) => {
+    setEditingCommentId(comment.id)
+    setEditCommentBody(comment.body)
+    setIsEditingComment(false)
+    setCommentBody('')
+  }
+
+  const handleSaveEditComment = () => {
+    if (!editingCommentId) return
+    const nextComments = updateTaskComment(meta.comments, editingCommentId, editCommentBody)
+    if (!nextComments) return
+    saveMeta({
+      ...meta,
+      comments: nextComments,
+    })
+    setEditingCommentId(null)
+    setEditCommentBody('')
+  }
+
+  const handleCancelEditComment = () => {
+    setEditingCommentId(null)
+    setEditCommentBody('')
+  }
+
+  const handleDeleteComment = (commentId: string) => {
+    saveMeta({
+      ...meta,
+      comments: deleteTaskComment(meta.comments, commentId),
+    })
+    if (editingCommentId === commentId) {
+      setEditingCommentId(null)
+      setEditCommentBody('')
+    }
   }
 
   const updateTaskField = async (
@@ -903,7 +943,11 @@ export function TaskDetailsPage({
                 {!isEditingComment && (
                   <button
                     type="button"
-                    onClick={() => setIsEditingComment(true)}
+                    onClick={() => {
+                      setEditingCommentId(null)
+                      setEditCommentBody('')
+                      setIsEditingComment(true)
+                    }}
                     className="inline-flex items-center gap-1 rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50"
                   >
                     <Pencil size={12} />
@@ -957,18 +1001,74 @@ export function TaskDetailsPage({
                   meta.comments.map((comment) => (
                     <article key={comment.id} className="rounded-xl border border-gray-200 bg-gray-50 p-3 sm:p-4">
                       <div className="mb-2 flex items-center justify-between gap-2 text-xs text-gray-500">
-                        <span className="font-semibold text-gray-700">{comment.author}</span>
-                        <span>{new Date(comment.createdAt).toLocaleString()}</span>
+                        <div className="flex min-w-0 flex-wrap items-center gap-2">
+                          <span className="font-semibold text-gray-700">{comment.author}</span>
+                          <span>{new Date(comment.createdAt).toLocaleString()}</span>
+                          {comment.updatedAt && (
+                            <span className="text-gray-400">(изменено)</span>
+                          )}
+                        </div>
+                        {editingCommentId !== comment.id && (
+                          <div className="flex shrink-0 items-center gap-1">
+                            <button
+                              type="button"
+                              onClick={() => handleStartEditComment(comment)}
+                              className="inline-flex h-7 w-7 items-center justify-center rounded-md text-gray-500 hover:bg-gray-100 hover:text-gray-700"
+                              aria-label="Редактировать комментарий"
+                              title="Редактировать"
+                            >
+                              <Pencil size={14} />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteComment(comment.id)}
+                              className="inline-flex h-7 w-7 items-center justify-center rounded-md text-red-500 hover:bg-red-50 hover:text-red-600"
+                              aria-label="Удалить комментарий"
+                              title="Удалить"
+                            >
+                              <Trash2 size={14} />
+                            </button>
+                          </div>
+                        )}
                       </div>
-                      <div
-                        className="rich-text-content"
-                        onClick={handleRichTextMediaClick}
-                        dangerouslySetInnerHTML={{
-                          __html: renderRichText(comment.body, {
-                            resolveImage: (id) => meta.richImages[id]?.dataUrl,
-                          }),
-                        }}
-                      />
+                      {editingCommentId === comment.id ? (
+                        <div>
+                          <RichTextEditor
+                            value={editCommentBody}
+                            onChange={setEditCommentBody}
+                            onStoreImage={storeRichImage}
+                            minRows={4}
+                            placeholder="Измените комментарий..."
+                          />
+                          <div className="mt-3 flex flex-wrap items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={handleSaveEditComment}
+                              className="inline-flex items-center justify-center gap-2 rounded-lg bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-black"
+                            >
+                              <Check size={14} />
+                              Сохранить
+                            </button>
+                            <button
+                              type="button"
+                              onClick={handleCancelEditComment}
+                              className="rounded-lg border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100"
+                            >
+                              Отменить
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div
+                          className="rich-text-content"
+                          onClick={handleRichTextMediaClick}
+                          dangerouslySetInnerHTML={{
+                            __html: renderRichText(comment.body, {
+                              resolveImage: (id) => meta.richImages[id]?.dataUrl,
+                            }),
+                          }}
+                        />
+                      )}
                     </article>
                   ))
                 )}

@@ -74,4 +74,30 @@ describe('api client auth headers', () => {
     expect(store.has('kanban-auth-token')).toBe(false)
     expect(assign).toHaveBeenCalledWith('/login')
   })
+
+  it('sends avatar payload with Authorization on updateAvatar', async () => {
+    setToken('avatar-token')
+    vi.mocked(fetch).mockResolvedValueOnce(
+      new Response(JSON.stringify({
+        user: {
+          id: 'u1',
+          username: 'ivan',
+          displayName: 'Ivan',
+          avatar: 'data:image/png;base64,abc',
+        },
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    )
+
+    await api.auth.updateAvatar('data:image/png;base64,abc')
+
+    const [url, options] = vi.mocked(fetch).mock.calls[0]
+    expect(url).toBe('/api/auth/avatar')
+    expect(options?.method).toBe('PUT')
+    const headers = options?.headers as Headers
+    expect(headers.get('Authorization')).toBe('Bearer avatar-token')
+    expect(options?.body).toBe(JSON.stringify({ avatar: 'data:image/png;base64,abc' }))
+  })
 })

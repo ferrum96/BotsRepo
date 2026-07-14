@@ -78,4 +78,29 @@ describe('Auth security', () => {
     expect(response.status).toBe(401)
     await expect(response.json()).resolves.toEqual({ error: 'Неверный логин или пароль' })
   })
+
+  it('rejects avatar update without Authorization', async () => {
+    const response = await app.request('/api/auth/avatar', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ avatar: 'data:image/png;base64,abc' }),
+    })
+
+    expect(response.status).toBe(401)
+    await expect(response.json()).resolves.toEqual({ error: 'Unauthorized' })
+  })
+
+  it('rejects avatar update with malformed bearer token', async () => {
+    const response = await app.request('/api/auth/avatar', {
+      method: 'PUT',
+      headers: {
+        Authorization: 'Bearer not-a-valid-jwt',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ avatar: 'data:image/png;base64,abc' }),
+    })
+
+    expect(response.status).toBe(401)
+    await expect(response.json()).resolves.toEqual({ error: 'Unauthorized' })
+  })
 })
