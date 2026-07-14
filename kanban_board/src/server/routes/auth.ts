@@ -4,8 +4,7 @@ import { eq } from 'drizzle-orm'
 import { db } from '../db/index.js'
 import { users } from '../db/schema.js'
 import { createToken, type AppVariables, type AuthUser } from '../auth.js'
-
-const MAX_AVATAR_LENGTH = 400_000
+import { parseAvatarUpdate } from '../lib/avatar.js'
 
 function toAuthUser(user: {
   id: string
@@ -58,24 +57,15 @@ authRouter.get('/me', (c) => {
 
 authRouter.put('/avatar', async (c) => {
   const session = c.get('user')
-  const body = await c.req.json().catch(() => null) as { avatar?: string | null } | null
+  const body = await c.req.json().catch(() => null)
+  const parsed = parseAvatarUpdate(body)
 
-  if (!body || !('avatar' in body)) {
-    return c.json({ error: 'Передайте поле avatar' }, 400)
-  }
-
-  const avatar = body.avatar
-  if (avatar !== null) {
-    if (typeof avatar !== 'string' || !avatar.startsWith('data:image/')) {
-      return c.json({ error: 'Аватар должен быть изображением' }, 400)
-    }
-    if (avatar.length > MAX_AVATAR_LENGTH) {
-      return c.json({ error: 'Слишком большой файл. Выберите изображение поменьше' }, 400)
-    }
+  if (!parsed.ok) {
+    return c.json({ error: parsed.error }, 400)
   }
 
   db.update(users)
-    .set({ avatar })
+    .set({ avatar: parsed.avatar })
     .where(eq(users.id, session.id))
     .run()
 
