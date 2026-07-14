@@ -203,6 +203,11 @@ export function UserProfileButton({ showName = true, variant = 'light' }: UserPr
           isDark ? 'hover:bg-gray-700 p-1' : 'hover:bg-gray-50 p-1'
         }`}
       >
+        {showName && (
+          <span className={`text-[21px] font-medium hidden sm:inline ${isDark ? 'text-white' : 'text-gray-900'}`}>
+            {user.displayName}
+          </span>
+        )}
         <div
           className={`rounded-full overflow-hidden flex items-center justify-center ${
             isDark ? 'w-12 h-12 bg-blue-600 text-white' : 'h-[54px] w-[54px] bg-blue-100 text-blue-700'
@@ -216,11 +221,6 @@ export function UserProfileButton({ showName = true, variant = 'light' }: UserPr
             <UserRound size={27} />
           )}
         </div>
-        {showName && (
-          <span className={`text-[21px] font-medium hidden sm:inline ${isDark ? 'text-white' : 'text-gray-900'}`}>
-            {user.displayName}
-          </span>
-        )}
       </button>
 
       <Dialog open={open} onOpenChange={handleOpenChange}>
