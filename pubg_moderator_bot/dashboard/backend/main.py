@@ -3,22 +3,26 @@
 from __future__ import annotations
 
 import logging
+import secrets
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional, Set
 
 import httpx
-from fastapi import Depends, FastAPI, HTTPException, Request, Security
+from fastapi import Depends, FastAPI, HTTPException, Request, Security, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.security import APIKeyHeader
 from starlette.status import HTTP_401_UNAUTHORIZED
 
+from telegram import Bot
+
 from bot.config import Config
 from bot.database import Database, Member, get_member_join_date
-from bot.group_titles import remove_from_group_header
+from bot.group_titles import assign_game_nick_tag, remove_from_group_header
 from dashboard.backend import schemas
+from dashboard.backend.events import EventHub
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +41,12 @@ async def _verify_api_key(request: Request, api_key: Optional[str] = Security(ap
         return
     if request.method == "GET":
         return
-    if api_key == config.dashboard_api_key:
+    expected = config.dashboard_api_key
+    if (
+        isinstance(api_key, str)
+        and len(api_key) == len(expected)
+        and secrets.compare_digest(api_key, expected)
+    ):
         return
     raise HTTPException(
         status_code=HTTP_401_UNAUTHORIZED, detail="Invalid or missing API key"
@@ -50,6 +59,7 @@ async def _lifespan(app: FastAPI):
     await db.connect()
     await db.init()
     app.state.db = db
+    app.state.event_hub = EventHub()
     yield
     if db._db is not None:
         await db._db.close()
@@ -60,10 +70,21 @@ app = FastAPI(title="PUBG Clan Dashboard API", lifespan=_lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+def _event_hub() -> EventHub:
+    return app.state.event_hub
+
+
+async def _broadcast(event: dict) -> None:
+    hub: EventHub | None = getattr(app.state, "event_hub", None)
+    if hub is None:
+        return
+    await hub.broadcast(event)
 
 
 async def get_db() -> Database:
@@ -165,9 +186,48 @@ async def health():
     return {"status": "ok"}
 
 
+@app.websocket("/ws")
+async def dashboard_ws(websocket: WebSocket):
+    """Live updates for the SPA. Optional ?token= matches DASHBOARD_API_KEY when set."""
+    if config.dashboard_api_key:
+        token = websocket.query_params.get("token", "")
+        expected = config.dashboard_api_key
+        if not (
+            isinstance(token, str)
+            and len(token) == len(expected)
+            and secrets.compare_digest(token, expected)
+        ):
+            await websocket.close(code=1008)
+            return
+
+    hub = _event_hub()
+    await hub.connect(websocket)
+    try:
+        await websocket.send_json({"type": "connected"})
+        while True:
+            # Keepalive / ignore client messages (ping text etc.).
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        pass
+    finally:
+        await hub.disconnect(websocket)
+
+
+@app.post("/internal/events")
+async def publish_internal_event(
+    request: Request,
+    _: None = Security(_verify_api_key),
+):
+    """Bot (or other services) push events for WebSocket broadcast."""
+    body = await request.json()
+    if not isinstance(body, dict) or "type" not in body:
+        raise HTTPException(status_code=400, detail="Event must be object with type")
+    sent = await _event_hub().broadcast(body)
+    return {"ok": True, "sent": sent}
+
+
 @app.get("/api/members", response_model=list[schemas.MemberOut])
 async def list_members(
-    request: Request,
     db: Database = Depends(get_db),
     _: None = Security(_verify_api_key),
 ):
@@ -180,7 +240,6 @@ async def list_members(
 
 @app.get("/api/blacklist", response_model=list[schemas.BlacklistOut])
 async def list_blacklist(
-    request: Request,
     db: Database = Depends(get_db),
     _: None = Security(_verify_api_key),
 ):
@@ -210,7 +269,6 @@ async def list_blacklist(
 
 @app.get("/api/inactive-members", response_model=list[schemas.InactiveMemberOut])
 async def list_inactive_members(
-    request: Request,
     db: Database = Depends(get_db),
     _: None = Security(_verify_api_key),
 ):
@@ -219,6 +277,7 @@ async def list_inactive_members(
     return [
         schemas.InactiveMemberOut(
             user_id=member.user_id,
+            tg_username=member.tg_username,
             game_nick=member.game_nick,
             real_name=member.real_name,
             discord_nick=member.discord_nick,
@@ -232,7 +291,6 @@ async def list_inactive_members(
 
 @app.get("/api/stats", response_model=schemas.StatsOut)
 async def get_stats(
-    request: Request,
     db: Database = Depends(get_db),
     _: None = Security(_verify_api_key),
 ):
@@ -246,9 +304,61 @@ async def get_stats(
     )
 
 
+@app.patch("/api/members/{user_id}", response_model=schemas.MemberOut)
+async def update_member(
+    user_id: int,
+    body: schemas.MemberUpdate,
+    db: Database = Depends(get_db),
+    _: None = Security(_verify_api_key),
+):
+    member = await db.get_member(user_id)
+    if not member:
+        raise HTTPException(status_code=404, detail="Member not found")
+
+    group_ids = await db.get_group_member_ids()
+    if user_id not in group_ids:
+        raise HTTPException(status_code=404, detail="Member not in group")
+
+    nick_changed = member.game_nick != body.game_nick
+    updated = await db.update_member_profile(
+        user_id,
+        game_nick=body.game_nick,
+        real_name=body.real_name,
+        discord_nick=body.discord_nick,
+        perspective=body.perspective,
+    )
+    if not updated:
+        raise HTTPException(status_code=404, detail="Member not found")
+
+    if nick_changed and not config.is_admin(user_id):
+        bot = Bot(token=config.bot_token)
+        ok = await assign_game_nick_tag(
+            bot,
+            config.group_id,
+            user_id,
+            body.game_nick,
+        )
+        if not ok:
+            logger.warning(
+                "Updated member %s in DB but failed to refresh Telegram member tag",
+                user_id,
+            )
+
+    refreshed = await db.get_member(user_id)
+    assert refreshed is not None
+    result = await _format_member(db, refreshed, group_ids)
+    await _broadcast(
+        {
+            "type": "members.changed",
+            "reason": "update",
+            "user_id": user_id,
+        }
+    )
+    return result
+
+
 @app.post("/api/members/{user_id}/kick")
 async def kick_member(
-    request: Request,
     user_id: int,
     db: Database = Depends(get_db),
     _: None = Security(_verify_api_key),
@@ -301,6 +411,13 @@ async def kick_member(
                     )
             await db.untrack_group_member(user_id)
             await db.add_to_blacklist(user_id, "kicked_from_dashboard")
+            await _broadcast(
+                {
+                    "type": "dashboard.refresh",
+                    "reason": "kick",
+                    "user_id": user_id,
+                }
+            )
             return {"ok": True}
 
         ban_resp = await client.post(
@@ -318,13 +435,19 @@ async def kick_member(
 
     await db.untrack_group_member(user_id)
     await db.add_to_blacklist(user_id, "kicked_from_dashboard")
+    await _broadcast(
+        {
+            "type": "dashboard.refresh",
+            "reason": "kick",
+            "user_id": user_id,
+        }
+    )
 
     return {"ok": True}
 
 
 @app.post("/api/blacklist/{user_id}/unblock")
 async def unblock_blacklist_member(
-    request: Request,
     user_id: int,
     db: Database = Depends(get_db),
     _: None = Security(_verify_api_key),
@@ -384,6 +507,13 @@ async def unblock_blacklist_member(
             user_id,
             blacklist_reason,
         )
+        await _broadcast(
+            {
+                "type": "dashboard.refresh",
+                "reason": "unblock",
+                "user_id": user_id,
+            }
+        )
         return {"ok": True, "requires_survey": True}
 
     async with httpx.AsyncClient() as client:
@@ -400,6 +530,13 @@ async def unblock_blacklist_member(
             if tg_status in {"member", "administrator", "creator", "restricted"}:
                 await db.track_group_member(user_id)
 
+    await _broadcast(
+        {
+            "type": "dashboard.refresh",
+            "reason": "unblock",
+            "user_id": user_id,
+        }
+    )
     return {"ok": True}
 
 
@@ -411,7 +548,6 @@ if FRONTEND_DIST.exists():
     @app.get("/{path:path}")
     async def serve_spa(
         path: str,
-        request: Request,
         _: None = Security(_verify_api_key),
     ):
         index = FRONTEND_DIST / "index.html"

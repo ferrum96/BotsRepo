@@ -8,9 +8,8 @@ from sqlalchemy import (
     Column,
     Integer,
     String,
-    create_engine,
 )
-from sqlalchemy.orm import declarative_base, sessionmaker
+from sqlalchemy.orm import declarative_base
 
 from bot.config import Config
 
@@ -63,18 +62,6 @@ class GroupMemberORM(Base):
 
     user_id = Column(Integer, primary_key=True)
     joined_at = Column(String, nullable=False, default=lambda: _now_utc().isoformat())
-
-
-def make_engine(database_path: str):
-    # Alembic and SQLAlchemy work with a sync sqlite connection.
-    return create_engine(
-        f"sqlite:///{database_path}",
-        connect_args={"check_same_thread": False},
-    )
-
-
-def make_session(engine):
-    return sessionmaker(bind=engine, autocommit=False, autoflush=False)
 
 
 def get_db_url(config: Optional[Config] = None) -> str:

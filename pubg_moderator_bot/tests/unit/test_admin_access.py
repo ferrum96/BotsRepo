@@ -1,3 +1,4 @@
+from typing import Optional
 from unittest.mock import AsyncMock, MagicMock
 
 from telegram.constants import ChatMemberStatus
@@ -31,13 +32,22 @@ def _member_update(
     old_status: str,
     new_status: str,
     chat_id: int = GROUP_ID,
+    old_tag: Optional[str] = None,
+    new_tag: Optional[str] = None,
 ):
     user = _User(user_id)
     old_cm = MagicMock()
     old_cm.status = old_status
+    old_cm.tag = None
+    old_cm.custom_title = None
+    old_cm.api_kwargs = {"tag": old_tag} if old_tag is not None else {}
     new_cm = MagicMock()
     new_cm.status = new_status
     new_cm.user = user
+    new_cm.tag = None
+    new_cm.custom_title = None
+    # Mimic PTB <22.7: tag lives in api_kwargs, not as a typed attribute.
+    new_cm.api_kwargs = {"tag": new_tag} if new_tag is not None else {}
     chat_member = MagicMock()
     chat_member.chat.id = chat_id
     chat_member.old_chat_member = old_cm
@@ -207,7 +217,7 @@ async def test_reject_skips_clan_members(db: Database, config: Config, monkeypat
     assert 302 in await db.get_group_member_ids()
 
 
-async def test_handle_join_retries_member_after_failed_promote(
+async def test_handle_join_assigns_member_tag(
     db: Database, config: Config, monkeypatch
 ):
     from bot.handlers.admin import _handle_vetted_group_join
@@ -217,8 +227,12 @@ async def test_handle_join_retries_member_after_failed_promote(
 
     assign = AsyncMock(return_value=True)
     reject = AsyncMock()
-    monkeypatch.setattr("bot.handlers.admin.assign_game_nick_title", assign)
+    restrict = AsyncMock(return_value=True)
+    monkeypatch.setattr("bot.handlers.admin.assign_game_nick_tag", assign)
     monkeypatch.setattr("bot.handlers.admin._reject_unauthorized_join", reject)
+    monkeypatch.setattr(
+        "bot.handlers.admin._apply_default_member_permissions", restrict
+    )
     monkeypatch.setattr("bot.handlers.admin.check_activity_on_join", AsyncMock())
     monkeypatch.setattr(
         "bot.handlers.admin._promote_from_completed_survey",
@@ -231,11 +245,49 @@ async def test_handle_join_retries_member_after_failed_promote(
 
     monkeypatch.setattr(db, "is_member", _is_member)
 
-    await _handle_vetted_group_join(MagicMock(), config, db, user)
+    bot = MagicMock()
+    await _handle_vetted_group_join(bot, config, db, user)
 
     reject.assert_not_called()
+    restrict.assert_awaited_once_with(bot, config, 303)
     assign.assert_awaited_once()
     assert assign.await_args.args[3] == "FoxNick"
+
+
+async def test_apply_default_member_permissions_messages_and_media_only(
+    config: Config,
+):
+    from bot.handlers.admin import _apply_default_member_permissions
+    from telegram import ChatPermissions
+
+    bot = AsyncMock()
+    ok = await _apply_default_member_permissions(bot, config, 909)
+    assert ok is True
+    bot.restrict_chat_member.assert_awaited_once()
+    kwargs = bot.restrict_chat_member.await_args.kwargs
+    assert kwargs["chat_id"] == config.group_id
+    assert kwargs["user_id"] == 909
+    perms: ChatPermissions = kwargs["permissions"]
+    assert perms.can_send_messages is True
+    assert perms.can_send_photos is True
+    assert perms.can_send_videos is True
+    assert perms.can_send_documents is True
+    assert perms.can_send_polls is True
+    assert perms.can_send_other_messages is True
+    assert perms.can_invite_users is False
+    assert perms.can_pin_messages is False
+    assert perms.can_change_info is False
+    assert perms.api_kwargs.get("can_edit_tag") is False
+    assert perms.api_kwargs.get("can_react_to_messages") is True
+
+
+async def test_apply_default_member_permissions_skips_config_admin(config: Config):
+    from bot.handlers.admin import _apply_default_member_permissions
+
+    bot = AsyncMock()
+    ok = await _apply_default_member_permissions(bot, config, config.admin_ids[0])
+    assert ok is False
+    bot.restrict_chat_member.assert_not_called()
 
 
 async def test_soft_kick_banned_event_does_not_blacklist(
@@ -402,3 +454,118 @@ async def test_unauthorized_join_event_rejects(
 
     reject.assert_awaited_once()
     assert reject.await_args.args[3] == 440
+
+
+async def test_manual_member_tag_change_updates_game_nick(
+    db: Database, mock_context
+):
+    await seed_member(db, 450, game_nick="OldNick", track_in_group=True)
+
+    update = _member_update(
+        user_id=450,
+        old_status=ChatMemberStatus.MEMBER,
+        new_status=ChatMemberStatus.MEMBER,
+        old_tag="OldNick",
+        new_tag="ManualNick",
+    )
+    await on_chat_member_update(update, mock_context)
+
+    member = await db.get_member(450)
+    assert member is not None
+    assert member.game_nick == "ManualNick"
+
+
+async def test_manual_tag_change_for_group_administrator(
+    db: Database, mock_context
+):
+    """Admin/owner title or tag edits must also land in DB."""
+    await seed_member(db, 452, game_nick="OldAdmin", track_in_group=True)
+
+    update = _member_update(
+        user_id=452,
+        old_status=ChatMemberStatus.ADMINISTRATOR,
+        new_status=ChatMemberStatus.ADMINISTRATOR,
+        old_tag="OldAdmin",
+        new_tag="NewAdminTitle",
+    )
+    await on_chat_member_update(update, mock_context)
+
+    member = await db.get_member(452)
+    assert member is not None
+    assert member.game_nick == "NewAdminTitle"
+
+
+async def test_manual_tag_change_for_config_admin_id(
+    db: Database, mock_context, config: Config
+):
+    admin_id = config.admin_ids[0]
+    await seed_member(db, admin_id, game_nick="BossOld", track_in_group=True)
+
+    update = _member_update(
+        user_id=admin_id,
+        old_status=ChatMemberStatus.MEMBER,
+        new_status=ChatMemberStatus.MEMBER,
+        old_tag="BossOld",
+        new_tag="BossNew",
+    )
+    await on_chat_member_update(update, mock_context)
+
+    member = await db.get_member(admin_id)
+    assert member is not None
+    assert member.game_nick == "BossNew"
+
+
+async def test_member_tag_from_api_kwargs():
+    from types import MappingProxyType
+
+    from bot.handlers.admin import _member_tag_from_chat_member
+    from telegram import ChatMemberMember
+
+    # Real PTB path: unknown fields land in mappingproxy api_kwargs.
+    cm = ChatMemberMember.de_json(
+        {
+            "status": "member",
+            "user": {"id": 1, "is_bot": False, "first_name": "Ab"},
+            "tag": "FromKwargs",
+        },
+        None,
+    )
+    assert isinstance(cm.api_kwargs, MappingProxyType)
+    assert _member_tag_from_chat_member(cm) == "FromKwargs"
+
+
+async def test_member_tag_from_real_ptb_cyrillic():
+    from bot.handlers.admin import _member_tag_from_chat_member
+    from telegram import ChatMemberMember
+
+    cm = ChatMemberMember.de_json(
+        {
+            "status": "member",
+            "user": {"id": 2, "is_bot": False, "first_name": "Ab"},
+            "tag": "AlcoSafпарк",
+        },
+        None,
+    )
+    assert _member_tag_from_chat_member(cm) == "AlcoSafпарк"
+
+
+async def test_matching_member_tag_does_not_rewrite_long_nick(
+    db: Database, mock_context
+):
+    long_nick = "VeryLongNicknameXX"
+    await seed_member(db, 451, game_nick=long_nick, track_in_group=True)
+    from bot.group_titles import build_game_nick_tag
+
+    clipped = build_game_nick_tag(long_nick)
+    update = _member_update(
+        user_id=451,
+        old_status=ChatMemberStatus.MEMBER,
+        new_status=ChatMemberStatus.MEMBER,
+        old_tag=clipped,
+        new_tag=clipped,
+    )
+    await on_chat_member_update(update, mock_context)
+
+    member = await db.get_member(451)
+    assert member is not None
+    assert member.game_nick == long_nick

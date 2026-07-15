@@ -22,6 +22,9 @@ API_KEY = "test-dashboard-secret"
 BOT_TOKEN = "123456:TEST_BOT_TOKEN"
 GROUP_ID = -1001234567890
 
+# Prod clan Telegram group is expected to stay at or below this size.
+PROD_GROUP_SIZE_CAP = 100
+
 
 def _purge_api_modules() -> None:
     for name in list(sys.modules):
@@ -182,6 +185,8 @@ class TelegramMockTransport(httpx.AsyncBaseTransport):
         if path.endswith("/unbanChatMember"):
             return httpx.Response(200, json={"ok": True, "result": True})
         if path.endswith("/promoteChatMember"):
+            return httpx.Response(200, json={"ok": True, "result": True})
+        if path.endswith("/setChatMemberTag"):
             return httpx.Response(200, json={"ok": True, "result": True})
         if path.endswith("/setChatAdministratorCustomTitle"):
             return httpx.Response(200, json={"ok": True, "result": True})

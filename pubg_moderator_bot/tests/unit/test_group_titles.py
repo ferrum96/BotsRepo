@@ -1,41 +1,68 @@
+from unittest.mock import AsyncMock, MagicMock
+
 from bot.group_titles import (
     CUSTOM_TITLE_MAX_LEN,
+    MEMBER_TAG_MAX_LEN,
+    assign_game_nick_tag,
+    build_game_nick_tag,
     build_game_nick_title,
     sanitize_custom_title,
+    sanitize_member_tag,
 )
 
 
 def test_sanitize_empty():
+    assert sanitize_member_tag("") == ""
+    assert sanitize_member_tag("   ") == ""
+    assert sanitize_member_tag(None) == ""  # type: ignore[arg-type]
     assert sanitize_custom_title("") == ""
-    assert sanitize_custom_title("   ") == ""
-    assert sanitize_custom_title(None) == ""  # type: ignore[arg-type]
 
 
 def test_sanitize_trims_whitespace():
-    assert sanitize_custom_title("  Nick  ") == "Nick"
+    assert sanitize_member_tag("  Nick  ") == "Nick"
 
 
 def test_sanitize_clips_to_utf16_limit():
-    # BMP characters: 1 UTF-16 unit each
     long_ascii = "A" * 20
-    assert len(sanitize_custom_title(long_ascii)) == CUSTOM_TITLE_MAX_LEN
+    assert len(sanitize_member_tag(long_ascii)) == MEMBER_TAG_MAX_LEN
+    assert MEMBER_TAG_MAX_LEN == CUSTOM_TITLE_MAX_LEN
 
-    # Emoji are 2 UTF-16 units each — 9 emoji = 18 units → clip to 8 emoji
     emoji = "😀" * 9
-    clipped = sanitize_custom_title(emoji)
-    assert len(clipped.encode("utf-16-le")) // 2 == CUSTOM_TITLE_MAX_LEN
+    assert sanitize_member_tag(emoji) == ""
 
 
-def test_build_game_nick_title_unwraps_braces():
-    assert build_game_nick_title("{Shadow}") == "Shadow"
+def test_build_game_nick_tag_unwraps_braces():
+    assert build_game_nick_tag("{Shadow}") == "Shadow"
     assert build_game_nick_title("{{Nested}}") == "Nested"
-    assert build_game_nick_title("{  Trim  }") == "Trim"
+    assert build_game_nick_tag("{  Trim  }") == "Trim"
 
 
-def test_build_game_nick_title_empty_after_normalize():
-    assert build_game_nick_title("{}") == ""
-    assert build_game_nick_title("   ") == ""
+def test_build_game_nick_tag_empty_after_normalize():
+    assert build_game_nick_tag("{}") == ""
+    assert build_game_nick_tag("   ") == ""
 
 
-def test_build_game_nick_title_preserves_short_nicks():
-    assert build_game_nick_title("Pro") == "Pro"
+def test_build_game_nick_tag_preserves_short_nicks():
+    assert build_game_nick_tag("Pro") == "Pro"
+
+
+async def test_assign_game_nick_tag_http(monkeypatch):
+    http = AsyncMock(return_value=True)
+    monkeypatch.setattr("bot.group_titles._set_chat_member_tag_http", http)
+
+    bot = MagicMock()
+    bot.token = "TOKEN"
+    # No native PTB helper — force HTTP fallback.
+    del bot.set_chat_member_tag
+
+    ok = await assign_game_nick_tag(bot, -100, 7, "AlcoSafr")
+    assert ok is True
+    http.assert_awaited_once()
+    assert http.await_args.kwargs["tag"] == "AlcoSafr"
+    assert http.await_args.kwargs["user_id"] == 7
+
+
+async def test_assign_game_nick_tag_skips_empty():
+    bot = AsyncMock()
+    bot.token = "TOKEN"
+    assert await assign_game_nick_tag(bot, -100, 7, "   ") is False

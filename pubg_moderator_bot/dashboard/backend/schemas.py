@@ -1,8 +1,8 @@
 """Pydantic schemas for the dashboard API."""
 
-from typing import Optional
+from typing import Literal, Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator
 
 
 class MemberOut(BaseModel):
@@ -20,6 +20,29 @@ class MemberOut(BaseModel):
         from_attributes = True
 
 
+class MemberUpdate(BaseModel):
+    game_nick: str = Field(..., min_length=1, max_length=64)
+    real_name: str = Field(..., min_length=1, max_length=64)
+    discord_nick: Optional[str] = Field(None, max_length=64)
+    perspective: Literal["FPP", "TPP", "Mixed"]
+
+    @field_validator("game_nick", "real_name")
+    @classmethod
+    def strip_required(cls, value: str) -> str:
+        cleaned = (value or "").strip()
+        if not cleaned:
+            raise ValueError("must not be empty")
+        return cleaned
+
+    @field_validator("discord_nick")
+    @classmethod
+    def strip_optional(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        cleaned = value.strip()
+        return cleaned or None
+
+
 class BlacklistOut(BaseModel):
     user_id: int
     tg_username: Optional[str] = None
@@ -35,6 +58,7 @@ class BlacklistOut(BaseModel):
 
 class InactiveMemberOut(BaseModel):
     user_id: int
+    tg_username: Optional[str] = None
     game_nick: str
     real_name: str
     discord_nick: Optional[str]

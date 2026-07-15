@@ -24,6 +24,7 @@ from telegram.ext import (
 from bot.activity_monitor import refresh_group_activity
 from bot.config import Config
 from bot.database import Database
+from bot.events import publish_dashboard_event
 from bot.handlers.admin import (
     cmd_assign_titles,
     cmd_blacklist,
@@ -40,7 +41,7 @@ from bot.handlers.admin import (
     on_chat_member_update,
     sync_group_members_state,
 )
-from bot.handlers.survey import build_survey_handler
+from bot.handlers.survey import build_survey_handler, cmd_contacts
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -146,6 +147,14 @@ async def _refresh_activity_job(context) -> None:
         result["skipped_join_grace"],
         result["errors"],
     )
+    await publish_dashboard_event(
+        config,
+        {
+            "type": "inactive.changed",
+            "reason": "activity_refresh",
+            "added": result["added_to_inactive"],
+        },
+    )
 
 
 def main() -> None:
@@ -163,6 +172,7 @@ def main() -> None:
     application.bot_data["db"] = db
 
     application.add_handler(build_survey_handler())
+    application.add_handler(CommandHandler("contacts", cmd_contacts))
 
     application.add_handler(CommandHandler("members", cmd_members))
     application.add_handler(CommandHandler("stats", cmd_stats))

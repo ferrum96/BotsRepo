@@ -7,17 +7,6 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 from bot.config import Config
 
 
-def _append_back_row(
-    rows: list[list[InlineKeyboardButton]],
-    back_callback_data: Optional[str],
-) -> list[list[InlineKeyboardButton]]:
-    if back_callback_data:
-        rows.append(
-            [InlineKeyboardButton("⬅️ Назад", callback_data=back_callback_data)]
-        )
-    return rows
-
-
 def age_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         [
@@ -77,8 +66,24 @@ def text_step_back_keyboard(back_callback_data: str) -> InlineKeyboardMarkup:
     )
 
 
+def admin_contact_buttons(config: Config) -> list[InlineKeyboardButton]:
+    contacts = config.admin_contacts
+    alone = len(contacts) == 1
+    return [
+        InlineKeyboardButton(contact.button_text(alone=alone), url=contact.url)
+        for contact in contacts
+    ]
+
+
+def admin_contact_keyboard(config: Config) -> Optional[InlineKeyboardMarkup]:
+    buttons = admin_contact_buttons(config)
+    if not buttons:
+        return None
+    return InlineKeyboardMarkup([[button] for button in buttons])
+
+
 def join_clan_keyboard(config: Config) -> InlineKeyboardMarkup:
-    buttons = []
+    buttons: list[list[InlineKeyboardButton]] = []
     if config.telegram_group_link:
         buttons.append(
             [

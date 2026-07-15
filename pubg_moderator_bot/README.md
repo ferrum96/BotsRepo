@@ -169,10 +169,12 @@ Legacy-доступ через host-nginx порт:
 | `ADMIN_IDS` | ID администраторов через запятую |
 | `TELEGRAM_GROUP_LINK` | Invite-ссылка на супергруппу клана |
 | `DISCORD_LINK` | Invite-ссылка Discord (опционально) |
+| `ADMIN_CONTACT_USERNAME` | Контакты админов через запятую (`@a,@b` или `Имя|@a,Имя2|@b`) |
 | `DATABASE_PATH` | Путь к SQLite-файлу (по умолчанию `data/bot.db`) |
 | `MAX_SURVEY_ATTEMPTS` | Максимальное число попыток опроса (по умолчанию 2) |
 | `DASHBOARD_PORT` | Порт FastAPI дашборда (по умолчанию 8080) |
 | `DASHBOARD_API_KEY` | API-ключ для защиты мутающих endpoints (опционально) |
+| `DASHBOARD_EVENTS_URL` | URL API для пуша событий из бота (`http://127.0.0.1:8081` в dev) |
 | `GROUP_SYNC_INTERVAL_MINUTES` | Интервал фоновой сверки состава группы (по умолчанию 10) |
 
 ## Структура проекта

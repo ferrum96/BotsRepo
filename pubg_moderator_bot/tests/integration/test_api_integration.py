@@ -1,4 +1,4 @@
-from tests.conftest import seed_blacklist_sync, seed_member_sync
+from tests.conftest import PROD_GROUP_SIZE_CAP, seed_blacklist_sync, seed_member_sync
 
 
 def test_health_endpoint(api_client):
@@ -18,6 +18,37 @@ def test_members_lists_only_group_members(api_client, db_path):
     assert payload[0]["user_id"] == 1001
     assert payload[0]["game_nick"] == "InGroup"
     assert payload[0]["is_removed"] is False
+
+
+def test_members_list_handles_prod_group_size(api_client, db_path):
+    """Dashboard must return full clan roster up to prod size (~100)."""
+    for i in range(1, PROD_GROUP_SIZE_CAP + 1):
+        seed_member_sync(
+            db_path,
+            user_id=20_000 + i,
+            game_nick=f"Player{i:03d}",
+            real_name=f"Name{i}",
+            tg_username=f"tg{i}",
+            track_in_group=True,
+        )
+    # Noise: completed survey but not currently in Telegram group.
+    for i in range(1, 11):
+        seed_member_sync(
+            db_path,
+            user_id=30_000 + i,
+            game_nick=f"Left{i}",
+            track_in_group=False,
+        )
+
+    response = api_client.get("/api/members")
+    assert response.status_code == 200
+    payload = response.json()
+    assert len(payload) == PROD_GROUP_SIZE_CAP
+    assert len(payload) <= PROD_GROUP_SIZE_CAP
+    nicks = {row["game_nick"] for row in payload}
+    assert "Player001" in nicks
+    assert f"Player{PROD_GROUP_SIZE_CAP:03d}" in nicks
+    assert "Left1" not in nicks
 
 
 def test_stats_endpoint(api_client, db_path):
@@ -124,3 +155,88 @@ def test_unblock_requires_survey_for_survey_failures(api_client, auth_headers, d
 def test_unblock_missing_entry_returns_404(api_client, auth_headers):
     response = api_client.post("/api/blacklist/4040/unblock", headers=auth_headers)
     assert response.status_code == 404
+
+
+def test_update_member_profile(api_client, auth_headers, db_path, monkeypatch):
+    seed_member_sync(db_path, 1001, game_nick="OldNick", real_name="Ivan", track_in_group=True)
+    from unittest.mock import AsyncMock
+
+    assign = AsyncMock(return_value=True)
+    monkeypatch.setattr("dashboard.backend.main.assign_game_nick_tag", assign)
+
+    response = api_client.patch(
+        "/api/members/1001",
+        headers=auth_headers,
+        json={
+            "game_nick": "NewNick",
+            "real_name": "Petr",
+            "discord_nick": "petr#1",
+            "perspective": "TPP",
+        },
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["game_nick"] == "NewNick"
+    assert body["real_name"] == "Petr"
+    assert body["discord_nick"] == "petr#1"
+    assert body["perspective"] == "TPP"
+    assign.assert_awaited_once()
+    assert assign.await_args.args[3] == "NewNick"
+
+    listed = api_client.get("/api/members").json()
+    assert listed[0]["game_nick"] == "NewNick"
+
+
+def test_update_member_without_nick_change_skips_tag(
+    api_client, auth_headers, db_path, monkeypatch
+):
+    seed_member_sync(db_path, 1001, game_nick="SameNick", track_in_group=True)
+    from unittest.mock import AsyncMock
+
+    assign = AsyncMock(return_value=True)
+    monkeypatch.setattr("dashboard.backend.main.assign_game_nick_tag", assign)
+
+    response = api_client.patch(
+        "/api/members/1001",
+        headers=auth_headers,
+        json={
+            "game_nick": "SameNick",
+            "real_name": "Ivan",
+            "discord_nick": None,
+            "perspective": "Mixed",
+        },
+    )
+    assert response.status_code == 200
+    assert response.json()["perspective"] == "Mixed"
+    assign.assert_not_awaited()
+
+
+def test_update_member_rejects_invalid_perspective(api_client, auth_headers, db_path):
+    seed_member_sync(db_path, 1001, track_in_group=True)
+    response = api_client.patch(
+        "/api/members/1001",
+        headers=auth_headers,
+        json={
+            "game_nick": "Nick",
+            "real_name": "Name",
+            "discord_nick": None,
+            "perspective": "Quad",
+        },
+    )
+    assert response.status_code == 422
+
+
+def test_update_member_requires_group_presence(api_client, auth_headers, db_path):
+    seed_member_sync(db_path, 1001, track_in_group=False)
+    response = api_client.patch(
+        "/api/members/1001",
+        headers=auth_headers,
+        json={
+            "game_nick": "Nick",
+            "real_name": "Name",
+            "discord_nick": None,
+            "perspective": "FPP",
+        },
+    )
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Member not in group"

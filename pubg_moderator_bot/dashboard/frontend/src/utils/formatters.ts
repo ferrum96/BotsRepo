@@ -11,15 +11,13 @@ export function formatJoinDate(date: string): string {
   }
 }
 
-export function isLegacyJoinDate(date: string): boolean {
-  return date === LEGACY_JOIN_DATE
-}
-
-export function perspectiveLabel(value: string): string {
-  const labels: Record<string, string> = {
-    FPP: 'FPP',
-    TPP: 'TPP',
-    Mixed: 'Mixed',
+export function formatMemberCount(count: number): string {
+  const mod100 = count % 100
+  const mod10 = count % 10
+  let word = 'участников'
+  if (mod100 < 11 || mod100 > 14) {
+    if (mod10 === 1) word = 'участник'
+    else if (mod10 >= 2 && mod10 <= 4) word = 'участника'
   }
-  return labels[value] || value
+  return `${count} ${word}`
 }

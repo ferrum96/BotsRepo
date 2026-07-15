@@ -17,9 +17,11 @@ from telegram.ext import (
 
 from bot import messages as msg
 from bot.database import Database, SurveyProgress
+from bot.events import publish_dashboard_event
 from bot.handlers.admin import ban_user_in_group
 from bot.keyboards import (
     activity_keyboard,
+    admin_contact_keyboard,
     age_keyboard,
     join_clan_keyboard,
     level_keyboard,
@@ -84,7 +86,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     config = _get_config(context)
 
     if await db.is_blacklisted(user.id):
-        await update.message.reply_text(msg.BLACKLISTED)
+        await update.message.reply_text(
+            msg.BLACKLISTED,
+            reply_markup=admin_contact_keyboard(config),
+        )
         return ConversationHandler.END
 
     if await db.is_member(user.id):
@@ -106,10 +111,26 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     if attempts >= config.max_survey_attempts:
         await db.add_to_blacklist(user.id, "survey_attempts_exhausted")
         await ban_user_in_group(context.bot, config, user.id, permanent=True)
-        await update.message.reply_text(msg.ATTEMPTS_EXHAUSTED)
+        await publish_dashboard_event(
+            config,
+            {
+                "type": "dashboard.refresh",
+                "reason": "blacklist",
+                "user_id": user.id,
+            },
+        )
+        await update.message.reply_text(
+            msg.ATTEMPTS_EXHAUSTED,
+            reply_markup=admin_contact_keyboard(config),
+        )
         return ConversationHandler.END
 
-    await update.message.reply_text(msg.WELCOME)
+    contacts_keyboard = admin_contact_keyboard(config)
+    welcome_text = msg.WELCOME
+    if contacts_keyboard:
+        welcome_text = f"{msg.WELCOME}\n\n{msg.SURVEY_CONTACTS_HINT}"
+    await update.message.reply_text(welcome_text, reply_markup=contacts_keyboard)
+    await update.message.reply_text(msg.SURVEY_INTRO)
     await update.message.reply_text(msg.ASK_AGE, reply_markup=age_keyboard())
 
     await db.set_progress(
@@ -131,9 +152,11 @@ async def _handle_rejection(
     user_id = query.from_user.id
     result = await _record_failed_attempt(context, user_id)
 
+    config = _get_config(context)
     if result["blacklisted"]:
         await query.edit_message_text(
-            f"{reject_message}\n\n{msg.ATTEMPTS_EXHAUSTED}"
+            f"{reject_message}\n\n{msg.ATTEMPTS_EXHAUSTED}",
+            reply_markup=admin_contact_keyboard(config),
         )
         return ConversationHandler.END
 
@@ -143,26 +166,20 @@ async def _handle_rejection(
     return ConversationHandler.END
 
 
-async def _handle_rejection_message(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE,
-    reject_message: str,
-) -> int:
+async def cmd_contacts(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
     message = update.message
-    user = update.effective_user
-    if not message or not user:
-        return ConversationHandler.END
+    if not message:
+        return
 
-    result = await _record_failed_attempt(context, user.id)
+    config = _get_config(context)
+    keyboard = admin_contact_keyboard(config)
+    if not keyboard:
+        await message.reply_text(msg.CONTACTS_UNAVAILABLE)
+        return
 
-    if result["blacklisted"]:
-        await message.reply_text(f"{reject_message}\n\n{msg.ATTEMPTS_EXHAUSTED}")
-        return ConversationHandler.END
-
-    await message.reply_text(
-        f"{reject_message}\n\n{msg.ATTEMPT_FAILED.format(remaining=result['remaining'])}"
-    )
-    return ConversationHandler.END
+    await message.reply_text(msg.CONTACTS, reply_markup=keyboard)
 
 
 async def _record_failed_attempt(
@@ -178,6 +195,14 @@ async def _record_failed_attempt(
         await db.add_to_blacklist(user_id, "survey_failed")
         # Ban in Telegram so invite links from the bot cannot be used to rejoin.
         await ban_user_in_group(context.bot, config, user_id, permanent=True)
+        await publish_dashboard_event(
+            config,
+            {
+                "type": "dashboard.refresh",
+                "reason": "blacklist",
+                "user_id": user_id,
+            },
+        )
         return {"blacklisted": True, "remaining": 0}
 
     return {"blacklisted": False, "remaining": remaining}
@@ -447,6 +472,9 @@ def build_survey_handler() -> ConversationHandler:
                 MessageHandler(filters.TEXT & ~filters.COMMAND, discord_input)
             ],
         },
-        fallbacks=[CommandHandler("cancel", cancel)],
+        fallbacks=[
+            CommandHandler("cancel", cancel),
+            CommandHandler("contacts", cmd_contacts),
+        ],
         allow_reentry=True,
     )

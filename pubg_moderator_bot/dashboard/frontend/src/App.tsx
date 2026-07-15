@@ -1,11 +1,14 @@
 import { Navigate, Route, Routes } from 'react-router-dom'
 
 import { DashboardLayout } from './components/layout/DashboardLayout'
+import { useDashboardSocket } from './hooks/useDashboardSocket'
 import { BlacklistPage } from './pages/BlacklistPage'
 import { InactiveMembersPage } from './pages/InactiveMembersPage'
 import { MembersPage } from './pages/MembersPage'
 
 export default function App() {
+  useDashboardSocket()
+
   return (
     <DashboardLayout>
       <Routes>
