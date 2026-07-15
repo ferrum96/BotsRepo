@@ -146,19 +146,19 @@ DEPLOY_ALL=1 ./deploy/deploy.sh
 | `fkandu_manager_bot/dashboard/frontend/` | `fkandu-dashboard` |
 | `fkandu_manager_bot/dashboard/backend/` | `fkandu-api` |
 | `fkandu_manager_bot/bot/`, `requirements.txt` | `fkandu-bot` |
-| `pubg_moderator_bot/dashboard/frontend/` | `pubg-api` (+ сборка SPA) |
-| `pubg_moderator_bot/dashboard/backend/`, `bot/` | `pubg-api`, `pubg-bot` |
-| `pubg_moderator_bot/alembic/` | `pubg-api`, `pubg-bot` (+ миграции) |
+| `bb_clan_moderator_bot/dashboard/frontend/` | `bb-clan-api` (+ сборка SPA) |
+| `bb_clan_moderator_bot/dashboard/backend/`, `bot/` | `bb-clan-api`, `bb-clan-bot` |
+| `bb_clan_moderator_bot/alembic/` | `bb-clan-api`, `bb-clan-bot` (+ миграции) |
 | `deploy/webhook.py`, `deploy/systemd/deploy-webhook.service` | `deploy-webhook` |
 | `deploy/nginx/nginx-systemd.conf` | nginx reload |
 
 ## Управление
 
 ```bash
-systemctl status kanban fkandu-dashboard fkandu-api fkandu-bot pubg-api pubg-bot deploy-webhook
-journalctl -u pubg-api -f
+systemctl status kanban fkandu-dashboard fkandu-api fkandu-bot bb-clan-api bb-clan-bot deploy-webhook
+journalctl -u bb-clan-api -f
 journalctl -u deploy-webhook -f
-systemctl restart pubg-api
+systemctl restart bb-clan-api
 ```
 
 ## URL

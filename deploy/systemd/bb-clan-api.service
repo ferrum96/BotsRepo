@@ -1,14 +1,14 @@
 [Unit]
-Description=PUBG Clan Dashboard API (FastAPI + SPA)
+Description=BB Clan Dashboard API (FastAPI + SPA)
 After=network.target
 
 [Service]
 Type=simple
 User=root
-WorkingDirectory=/root/BotsRepo/pubg_moderator_bot
-EnvironmentFile=/root/BotsRepo/pubg_moderator_bot/.env
+WorkingDirectory=/root/BotsRepo/bb_clan_moderator_bot
+EnvironmentFile=/root/BotsRepo/bb_clan_moderator_bot/.env
 EnvironmentFile=/root/BotsRepo/deploy/ports.env
-Environment=DATABASE_PATH=/root/BotsRepo/pubg_moderator_bot/data/bot.db
+Environment=DATABASE_PATH=/root/BotsRepo/bb_clan_moderator_bot/data/bot.db
 Environment=DASHBOARD_PORT=8080
 ExecStart=/usr/bin/python3 -m dashboard.backend.run
 Restart=always

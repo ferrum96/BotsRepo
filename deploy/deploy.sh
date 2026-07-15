@@ -5,7 +5,7 @@ export PATH="/root/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:
 
 DEPLOY_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_DIR="$(cd "${DEPLOY_DIR}/.." && pwd)"
-PUBG_DIR="${REPO_DIR}/pubg_moderator_bot"
+BB_CLAN_DIR="${REPO_DIR}/bb_clan_moderator_bot"
 PORTS_FILE="${DEPLOY_DIR}/ports.env"
 SYSTEMD_SRC="${DEPLOY_DIR}/systemd"
 NGINX_CONF="${DEPLOY_DIR}/nginx/nginx-systemd.conf"
@@ -16,8 +16,8 @@ SERVICES=(
   fkandu-dashboard
   fkandu-api
   fkandu-bot
-  pubg-api
-  pubg-bot
+  bb-clan-api
+  bb-clan-bot
   deploy-webhook
 )
 
@@ -25,11 +25,11 @@ NEEDS_KANBAN=false
 NEEDS_FKANDU_DASHBOARD=false
 NEEDS_FKANDU_API=false
 NEEDS_FKANDU_BOT=false
-NEEDS_PUBG_API=false
-NEEDS_PUBG_BOT=false
-NEEDS_PUBG_FRONTEND_BUILD=false
-NEEDS_PUBG_PIP=false
-NEEDS_PUBG_MIGRATE=false
+NEEDS_BB_CLAN_API=false
+NEEDS_BB_CLAN_BOT=false
+NEEDS_BB_CLAN_FRONTEND_BUILD=false
+NEEDS_BB_CLAN_PIP=false
+NEEDS_BB_CLAN_MIGRATE=false
 RESTART_SERVICES=()
 CHANGED_FILES=""
 
@@ -45,11 +45,25 @@ mark_all_services() {
   NEEDS_FKANDU_DASHBOARD=true
   NEEDS_FKANDU_API=true
   NEEDS_FKANDU_BOT=true
-  NEEDS_PUBG_API=true
-  NEEDS_PUBG_BOT=true
-  NEEDS_PUBG_FRONTEND_BUILD=true
-  NEEDS_PUBG_PIP=true
-  NEEDS_PUBG_MIGRATE=true
+  NEEDS_BB_CLAN_API=true
+  NEEDS_BB_CLAN_BOT=true
+  NEEDS_BB_CLAN_FRONTEND_BUILD=true
+  NEEDS_BB_CLAN_PIP=true
+  NEEDS_BB_CLAN_MIGRATE=true
+}
+
+# Read KEY=value from .env without bash `source` (safe for | @ spaces).
+env_get() {
+  local file="$1" key="$2" line val
+  [ -f "$file" ] || return 0
+  line="$(grep -E "^${key}=" "$file" | tail -1)" || true
+  [ -n "$line" ] || return 0
+  val="${line#*=}"
+  val="${val#\"}"
+  val="${val%\"}"
+  val="${val#\'}"
+  val="${val%\'}"
+  printf '%s' "$val"
 }
 
 mark_service_for_restart() {
@@ -90,37 +104,37 @@ mark_services_from_file() {
       NEEDS_FKANDU_BOT=true
       mark_service_for_restart fkandu-bot
       ;;
-    pubg_moderator_bot/dashboard/frontend/*)
-      NEEDS_PUBG_API=true
-      NEEDS_PUBG_FRONTEND_BUILD=true
-      mark_service_for_restart pubg-api
+    bb_clan_moderator_bot/dashboard/frontend/*)
+      NEEDS_BB_CLAN_API=true
+      NEEDS_BB_CLAN_FRONTEND_BUILD=true
+      mark_service_for_restart bb-clan-api
       ;;
-    pubg_moderator_bot/dashboard/backend/*)
-      NEEDS_PUBG_API=true
-      NEEDS_PUBG_PIP=true
-      mark_service_for_restart pubg-api
+    bb_clan_moderator_bot/dashboard/backend/*)
+      NEEDS_BB_CLAN_API=true
+      NEEDS_BB_CLAN_PIP=true
+      mark_service_for_restart bb-clan-api
       ;;
-    pubg_moderator_bot/bot/*)
-      NEEDS_PUBG_API=true
-      NEEDS_PUBG_BOT=true
-      NEEDS_PUBG_PIP=true
-      mark_service_for_restart pubg-api
-      mark_service_for_restart pubg-bot
+    bb_clan_moderator_bot/bot/*)
+      NEEDS_BB_CLAN_API=true
+      NEEDS_BB_CLAN_BOT=true
+      NEEDS_BB_CLAN_PIP=true
+      mark_service_for_restart bb-clan-api
+      mark_service_for_restart bb-clan-bot
       ;;
-    pubg_moderator_bot/requirements.txt)
-      NEEDS_PUBG_API=true
-      NEEDS_PUBG_BOT=true
-      NEEDS_PUBG_PIP=true
-      mark_service_for_restart pubg-api
-      mark_service_for_restart pubg-bot
+    bb_clan_moderator_bot/requirements.txt)
+      NEEDS_BB_CLAN_API=true
+      NEEDS_BB_CLAN_BOT=true
+      NEEDS_BB_CLAN_PIP=true
+      mark_service_for_restart bb-clan-api
+      mark_service_for_restart bb-clan-bot
       ;;
-    pubg_moderator_bot/alembic/*|pubg_moderator_bot/alembic.ini)
-      NEEDS_PUBG_API=true
-      NEEDS_PUBG_BOT=true
-      NEEDS_PUBG_PIP=true
-      NEEDS_PUBG_MIGRATE=true
-      mark_service_for_restart pubg-api
-      mark_service_for_restart pubg-bot
+    bb_clan_moderator_bot/alembic/*|bb_clan_moderator_bot/alembic.ini)
+      NEEDS_BB_CLAN_API=true
+      NEEDS_BB_CLAN_BOT=true
+      NEEDS_BB_CLAN_PIP=true
+      NEEDS_BB_CLAN_MIGRATE=true
+      mark_service_for_restart bb-clan-api
+      mark_service_for_restart bb-clan-bot
       ;;
     deploy/systemd/kanban.service)
       NEEDS_KANBAN=true
@@ -138,13 +152,13 @@ mark_services_from_file() {
       NEEDS_FKANDU_BOT=true
       mark_service_for_restart fkandu-bot
       ;;
-    deploy/systemd/pubg-api.service)
-      NEEDS_PUBG_API=true
-      mark_service_for_restart pubg-api
+    deploy/systemd/bb-clan-api.service)
+      NEEDS_BB_CLAN_API=true
+      mark_service_for_restart bb-clan-api
       ;;
-    deploy/systemd/pubg-bot.service)
-      NEEDS_PUBG_BOT=true
-      mark_service_for_restart pubg-bot
+    deploy/systemd/bb-clan-bot.service)
+      NEEDS_BB_CLAN_BOT=true
+      mark_service_for_restart bb-clan-bot
       ;;
     deploy/systemd/deploy-webhook.service|deploy/webhook.py|deploy/deploy.sh|deploy/webhook.env|deploy/webhook.env.example)
       mark_service_for_restart deploy-webhook
@@ -336,31 +350,31 @@ EOF
   echo "Caddy: deploy-webhook route готов"
 }
 
-verify_pubg_api() {
-  local port="${PORT_PUBG_API:-8080}"
-  echo "Проверка pubg-api на :${port}..."
+verify_bb_clan_api() {
+  local port="${PORT_BB_CLAN_API:-${PORT_PUBG_API:-8080}}"
+  echo "Проверка bb-clan-api на :${port}..."
 
-  if ! systemctl is-active --quiet pubg-api 2>/dev/null; then
-    echo "ОШИБКА: pubg-api не запущен"
-    journalctl -u pubg-api -n 30 --no-pager || true
+  if ! systemctl is-active --quiet bb-clan-api 2>/dev/null; then
+    echo "ОШИБКА: bb-clan-api не запущен"
+    journalctl -u bb-clan-api -n 30 --no-pager || true
     return 1
   fi
 
   if curl -sf "http://127.0.0.1:${port}/health" >/dev/null; then
-    echo "  pubg-api OK (http://127.0.0.1:${port}/health)"
+    echo "  bb-clan-api OK (http://127.0.0.1:${port}/health)"
     return 0
   fi
 
-  echo "ОШИБКА: pubg-api не отвечает на :${port}"
-  journalctl -u pubg-api -n 30 --no-pager || true
+  echo "ОШИБКА: bb-clan-api не отвечает на :${port}"
+  journalctl -u bb-clan-api -n 30 --no-pager || true
   ss -tlnp | grep ":${port}" || echo "  порт ${port} не слушается"
   return 1
 }
 
-should_restart_pubg_api() {
+should_restart_bb_clan_api() {
   local service
   for service in "${RESTART_SERVICES[@]}"; do
-    if [ "$service" = "pubg-api" ]; then
+    if [ "$service" = "bb-clan-api" ]; then
       return 0
     fi
   done
@@ -428,36 +442,30 @@ else
   echo "Fkandu Bot: без изменений — пропуск pip install"
 fi
 
-if [ "$NEEDS_PUBG_API" = true ] || [ "$NEEDS_PUBG_BOT" = true ]; then
-  echo "PUBG: обновление..."
-  cd "$PUBG_DIR"
+if [ "$NEEDS_BB_CLAN_API" = true ] || [ "$NEEDS_BB_CLAN_BOT" = true ]; then
+  echo "BB Clan: обновление..."
+  cd "$BB_CLAN_DIR"
 
-  if [ -f .env ]; then
-    set -a
-    # shellcheck disable=SC1091
-    source .env
-    set +a
-    export VITE_DASHBOARD_API_KEY="${DASHBOARD_API_KEY:-}"
-  fi
+  export VITE_DASHBOARD_API_KEY="$(env_get .env DASHBOARD_API_KEY)"
 
-  if [ "$NEEDS_PUBG_PIP" = true ] || [ "$NEEDS_PUBG_API" = true ] || [ "$NEEDS_PUBG_BOT" = true ]; then
+  if [ "$NEEDS_BB_CLAN_PIP" = true ] || [ "$NEEDS_BB_CLAN_API" = true ] || [ "$NEEDS_BB_CLAN_BOT" = true ]; then
     pip3 install -q -r requirements.txt
   fi
 
-  if [ "$NEEDS_PUBG_MIGRATE" = true ]; then
+  if [ "$NEEDS_BB_CLAN_MIGRATE" = true ]; then
     alembic upgrade head
   fi
 
-  if [ "$NEEDS_PUBG_FRONTEND_BUILD" = true ]; then
+  if [ "$NEEDS_BB_CLAN_FRONTEND_BUILD" = true ]; then
     cd dashboard/frontend
     npm ci --silent
     npm run build
-    cd "$PUBG_DIR"
+    cd "$BB_CLAN_DIR"
   fi
 
   cd "$REPO_DIR"
 else
-  echo "PUBG: без изменений — пропуск сборки"
+  echo "BB Clan: без изменений — пропуск сборки"
 fi
 
 echo ""
@@ -468,15 +476,15 @@ reload_nginx
 ensure_ufw_deploy_webhook_port
 ensure_caddy_deploy_webhook_route
 
-if should_restart_pubg_api; then
-  verify_pubg_api || true
+if should_restart_bb_clan_api; then
+  verify_bb_clan_api || true
 else
-  echo "pubg-api не перезапускался — пропуск health-check"
+  echo "bb-clan-api не перезапускался — пропуск health-check"
 fi
 
 echo ""
 echo "=== Деплой завершен ==="
-echo "Порты: fkandu :444/:445/:446 | pubg :447 (→:${PORT_PUBG_API:-8080}) | kanban :448 (→:${PORT_KANBAN:-3002}) | webhook :${PORT_DEPLOY_WEBHOOK_PUBLIC:-450} (→:${PORT_DEPLOY_WEBHOOK:-9000})"
+echo "Порты: fkandu :444/:445/:446 | bb-clan :447 (→:${PORT_BB_CLAN_API:-${PORT_PUBG_API:-8080}}) | kanban :448 (→:${PORT_KANBAN:-3002}) | webhook :${PORT_DEPLOY_WEBHOOK_PUBLIC:-450} (→:${PORT_DEPLOY_WEBHOOK:-9000})"
 echo "GitHub webhook (HTTP): http://IP:${PORT_DEPLOY_WEBHOOK_PUBLIC:-450}/  | HTTPS: https://GATEWAY${DEPLOY_WEBHOOK_PATH:-/hooks/deploy}"
 if [ ${#RESTART_SERVICES[@]} -gt 0 ]; then
   systemctl status "${RESTART_SERVICES[@]}" --no-pager
