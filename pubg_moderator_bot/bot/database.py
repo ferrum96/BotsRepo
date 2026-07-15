@@ -233,8 +233,7 @@ class Database:
                 game_nick = excluded.game_nick,
                 real_name = excluded.real_name,
                 discord_nick = excluded.discord_nick,
-                perspective = excluded.perspective,
-                created_at = excluded.created_at
+                perspective = excluded.perspective
             """,
             (
                 user_id,
@@ -253,6 +252,45 @@ class Database:
             "DELETE FROM survey_progress WHERE user_id = ?", (user_id,)
         )
         await db.commit()
+
+    async def update_member_profile(
+        self,
+        user_id: int,
+        *,
+        game_nick: str,
+        real_name: str,
+        discord_nick: Optional[str],
+        perspective: str,
+    ) -> bool:
+        """Update editable profile fields without resetting created_at."""
+        db = await self.connect()
+        cursor = await db.execute(
+            """
+            UPDATE members
+            SET game_nick = ?,
+                real_name = ?,
+                discord_nick = ?,
+                perspective = ?
+            WHERE user_id = ?
+            """,
+            (game_nick, real_name, discord_nick, perspective, user_id),
+        )
+        await db.commit()
+        return cursor.rowcount > 0
+
+    async def update_member_game_nick(self, user_id: int, game_nick: str) -> bool:
+        """Update only game_nick (e.g. after a manual Telegram title change)."""
+        db = await self.connect()
+        cursor = await db.execute(
+            """
+            UPDATE members
+            SET game_nick = ?
+            WHERE user_id = ?
+            """,
+            (game_nick, user_id),
+        )
+        await db.commit()
+        return cursor.rowcount > 0
 
     async def get_all_members(self) -> list[Member]:
         db = await self.connect()
@@ -358,15 +396,7 @@ class Database:
         row = await cursor.fetchone()
         if not row:
             return None
-        return SurveyProgress(
-            user_id=row["user_id"],
-            step=row["step"],
-            game_nick=row["game_nick"],
-            real_name=row["real_name"],
-            discord_nick=row["discord_nick"],
-            perspective=row["perspective"],
-            attempts=row["attempts"],
-        )
+        return _row_to_progress(row)
 
     async def get_progress_by_step(self, step: str) -> list[SurveyProgress]:
         db = await self.connect()
@@ -375,18 +405,7 @@ class Database:
             (step,),
         )
         rows = await cursor.fetchall()
-        return [
-            SurveyProgress(
-                user_id=row["user_id"],
-                step=row["step"],
-                game_nick=row["game_nick"],
-                real_name=row["real_name"],
-                discord_nick=row["discord_nick"],
-                perspective=row["perspective"],
-                attempts=row["attempts"],
-            )
-            for row in rows
-        ]
+        return [_row_to_progress(row) for row in rows]
 
     async def set_progress(self, progress: SurveyProgress) -> None:
         db = await self.connect()
@@ -495,4 +514,16 @@ def _row_to_member(row: aiosqlite.Row) -> Member:
         last_match_at=row["last_match_at"],
         last_match_checked_at=row["last_match_checked_at"],
         created_at=row["created_at"],
+    )
+
+
+def _row_to_progress(row: aiosqlite.Row) -> SurveyProgress:
+    return SurveyProgress(
+        user_id=row["user_id"],
+        step=row["step"],
+        game_nick=row["game_nick"],
+        real_name=row["real_name"],
+        discord_nick=row["discord_nick"],
+        perspective=row["perspective"],
+        attempts=row["attempts"],
     )

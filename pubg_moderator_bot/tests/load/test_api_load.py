@@ -4,7 +4,7 @@ import time
 import httpx
 from fastapi.testclient import TestClient
 
-from tests.conftest import seed_member_sync
+from tests.conftest import PROD_GROUP_SIZE_CAP, seed_member_sync
 
 
 def test_api_health_load(api_module):
@@ -32,6 +32,26 @@ def test_api_members_list_load(api_module, db_path):
 
     ok_count = sum(1 for r in responses if r.status_code == 200)
     assert ok_count == 100
+    assert elapsed < 10
+
+
+def test_api_members_list_prod_size_payload(api_module, db_path):
+    """Repeated reads of a full ~100-member roster stay fast enough."""
+    with TestClient(api_module.app) as client:
+        for i in range(1, PROD_GROUP_SIZE_CAP + 1):
+            seed_member_sync(
+                db_path,
+                user_id=40_000 + i,
+                game_nick=f"Load{i}",
+                track_in_group=True,
+            )
+
+        start = time.perf_counter()
+        responses = [client.get("/api/members") for _ in range(20)]
+        elapsed = time.perf_counter() - start
+
+    assert all(r.status_code == 200 for r in responses)
+    assert all(len(r.json()) == PROD_GROUP_SIZE_CAP for r in responses)
     assert elapsed < 10
 
 

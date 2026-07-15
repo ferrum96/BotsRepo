@@ -35,31 +35,43 @@ export function Sidebar({
 }: SidebarProps) {
   return (
     <nav
-      className={`flex flex-col h-full py-stack-lg bg-[#060b14] border-r border-outline-level fixed left-0 top-0 z-50 transition-all duration-200 ${isCollapsed ? 'md:w-[88px]' : 'md:w-sidebar'
-        } w-sidebar ${isMobileOpen ? 'translate-x-0' : '-translate-x-full'} md:translate-x-0`}
+      className={`flex flex-col h-dvh min-h-screen overflow-y-auto py-stack-lg bg-[#060b14] border-r border-outline-level fixed left-0 top-0 z-50 transition-all duration-200 w-[min(260px,85vw)] ${isCollapsed ? 'md:w-[88px]' : 'md:w-sidebar'
+        } ${isMobileOpen ? 'translate-x-0' : '-translate-x-full'} md:translate-x-0`}
     >
-      <button
-        type="button"
-        className={`mb-stack-lg text-left ${isCollapsed ? 'px-container md:px-4' : 'px-container'} md:cursor-pointer`}
-        title={isCollapsed ? 'Развернуть сайдбар' : 'Свернуть сайдбар'}
-        onClick={() => {
-          if (window.innerWidth >= 768) {
-            onToggleCollapse()
-          }
-        }}
+      <div
+        className={`mb-stack-lg flex items-start justify-between gap-2 ${isCollapsed ? 'px-container md:px-4' : 'px-container'}`}
       >
-        <div className={`flex items-center gap-stack-md ${isCollapsed ? 'md:justify-center' : ''}`}>
-          <ClanLogo />
-          <div className={isCollapsed ? 'md:hidden' : ''}>
-            <h1 className="text-[22px] leading-tight font-bold text-electric tracking-tight">
-              BB Clan
-            </h1>
-            <p className="text-[10px] font-mono text-on-surface tracking-[0.22em] uppercase mt-0.5">
-              Command Center
-            </p>
+        <button
+          type="button"
+          className="min-w-0 flex-1 text-left md:cursor-pointer"
+          title={isCollapsed ? 'Развернуть сайдбар' : 'Свернуть сайдбар'}
+          onClick={() => {
+            if (window.innerWidth >= 768) {
+              onToggleCollapse()
+            }
+          }}
+        >
+          <div className={`flex items-center gap-stack-md ${isCollapsed ? 'md:justify-center' : ''}`}>
+            <ClanLogo />
+            <div className={isCollapsed ? 'md:hidden' : ''}>
+              <h1 className="text-[22px] leading-tight font-bold text-electric tracking-tight">
+                BB Clan
+              </h1>
+              <p className="text-[10px] font-mono text-on-surface tracking-[0.22em] uppercase mt-0.5">
+                Command Center
+              </p>
+            </div>
           </div>
-        </div>
-      </button>
+        </button>
+        <button
+          type="button"
+          className="btn-ghost md:hidden shrink-0"
+          onClick={onCloseMobile}
+          aria-label="Закрыть меню"
+        >
+          <span className="material-symbols-outlined text-[22px]">close</span>
+        </button>
+      </div>
       <ul className="flex flex-col flex-grow gap-1">
         {navItems.map((item) => (
           <li key={item.to}>

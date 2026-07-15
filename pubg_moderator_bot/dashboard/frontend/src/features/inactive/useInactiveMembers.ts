@@ -1,29 +1,12 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useQuery } from '@tanstack/react-query'
 
-import {
-  fetchInactiveMembers,
-  kickMember,
-} from '../../api/client'
-
-const KEY = ['inactive-members']
+import { fetchInactiveMembers } from '../../api/client'
+import { INACTIVE_KEY } from '../../utils/queryKeys'
 
 export function useInactiveMembers() {
   return useQuery({
-    queryKey: KEY,
+    queryKey: INACTIVE_KEY,
     queryFn: fetchInactiveMembers,
-    refetchInterval: 60_000,
-  })
-}
-
-export function useKickInactiveMember() {
-  const queryClient = useQueryClient()
-  return useMutation({
-    mutationFn: (userId: number) => kickMember(userId),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: KEY })
-      queryClient.invalidateQueries({ queryKey: ['members'] })
-      queryClient.invalidateQueries({ queryKey: ['blacklist'] })
-      queryClient.invalidateQueries({ queryKey: ['stats'] })
-    },
+    refetchInterval: 5 * 60 * 1000,
   })
 }

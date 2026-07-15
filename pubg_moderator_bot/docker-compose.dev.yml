@@ -41,6 +41,7 @@ services:
     environment:
       - DATABASE_PATH=/app/data/bot.db
       - DASHBOARD_PORT=8080
+      - DASHBOARD_EVENTS_URL=
     command: ["sh", "-c", "alembic upgrade head && uvicorn dashboard.backend.main:app --host 0.0.0.0 --port 8080 --reload"]
 
   pubg-bot:
@@ -59,3 +60,5 @@ services:
       - ./alembic.ini:/app/alembic.ini
     environment:
       - DATABASE_PATH=/app/data/bot.db
+      # Bot runs with host networking; API is published on localhost:8081.
+      - DASHBOARD_EVENTS_URL=http://127.0.0.1:8081

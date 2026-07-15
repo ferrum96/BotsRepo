@@ -16,9 +16,18 @@ export default defineConfig({
         target: apiTarget,
         changeOrigin: true,
       },
+      '/internal': {
+        target: apiTarget,
+        changeOrigin: true,
+      },
       '/health': {
         target: apiTarget,
         changeOrigin: true,
+      },
+      '/ws': {
+        target: apiTarget,
+        changeOrigin: true,
+        ws: true,
       },
     },
   },

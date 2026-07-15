@@ -3,6 +3,7 @@ import { useState } from 'react'
 import { BlacklistEntry } from '../api/client'
 import { PageHeader } from '../components/layout/PageHeader'
 import { Button } from '../components/ui/Button'
+import { TelegramDmButton } from '../components/ui/TelegramDmButton'
 import { ConfirmModal } from '../components/ui/ConfirmModal'
 import { Badge } from '../components/ui/Badge'
 import { DataTable, Column } from '../components/table/DataTable'
@@ -50,10 +51,19 @@ export function BlacklistPage() {
   const paged = filtered.slice((pageSafe - 1) * PAGE_SIZE, pageSafe * PAGE_SIZE)
   const columns: Column<BlacklistEntry>[] = [
     {
+      key: 'tg',
+      header: '',
+      cell: (row) => (
+        <TelegramDmButton userId={row.user_id} tgUsername={row.tg_username} />
+      ),
+    },
+    {
       key: 'tg_username',
       header: 'Ник TG',
+      headerClassName: 'hidden sm:table-cell',
+      cellClassName: 'hidden sm:table-cell',
       cell: (row) => (
-        <span className="inline-block max-w-[140px] truncate text-center sm:max-w-none">
+        <span className="inline-block max-w-[140px] truncate text-center md:max-w-none">
           {row.tg_username ? `@${row.tg_username}` : `ID ${row.user_id}`}
         </span>
       ),
@@ -61,8 +71,10 @@ export function BlacklistPage() {
     {
       key: 'real_name',
       header: 'Имя',
+      headerClassName: 'hidden md:table-cell',
+      cellClassName: 'hidden md:table-cell',
       cell: (row) => (
-        <span className="inline-block max-w-[120px] truncate text-center sm:max-w-none">
+        <span className="inline-block max-w-[120px] truncate text-center md:max-w-none">
           {row.real_name || '—'}
         </span>
       ),
@@ -71,9 +83,14 @@ export function BlacklistPage() {
       key: 'game_nick',
       header: 'Ник в игре',
       cell: (row) => (
-        <span className="inline-block max-w-[120px] truncate text-center font-bold text-electric sm:max-w-none">
-          {row.game_nick || '—'}
-        </span>
+        <div className="flex flex-col items-center justify-center gap-0.5">
+          <span className="inline-block max-w-[36vw] truncate text-center font-bold text-electric sm:max-w-[140px] md:max-w-none">
+            {row.game_nick || '—'}
+          </span>
+          <span className="sm:hidden text-[11px] text-on-surface-variant max-w-[36vw] truncate">
+            {row.tg_username ? `@${row.tg_username}` : `ID ${row.user_id}`}
+          </span>
+        </div>
       ),
     },
     {
@@ -108,18 +125,30 @@ export function BlacklistPage() {
     {
       key: 'actions',
       header: '',
-      cell: (row) => (
-        <Button
-          variant="ghost"
-          className="w-auto px-2 py-1 text-[11px] sm:text-[12px] text-emerald-400 hover:text-emerald-300 hover:bg-emerald-950/30 whitespace-nowrap"
-          onClick={() => restoreConfirm.openFor(row.user_id)}
-          disabled={unblockMember.isPending}
-        >
-          {unblockMember.isPending && unblockMember.variables === row.user_id
-            ? 'Восст…'
-            : 'Вернуть доступ'}
-        </Button>
-      ),
+      cell: (row) => {
+        const restoring =
+          unblockMember.isPending && unblockMember.variables === row.user_id
+        return (
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-center gap-1 sm:gap-2">
+            <Button
+              variant="ghost"
+              className="min-h-9 w-full sm:w-auto px-2 py-1.5 text-[12px] text-emerald-400 hover:text-emerald-300 hover:bg-emerald-950/30 whitespace-nowrap"
+              onClick={() => restoreConfirm.openFor(row.user_id)}
+              disabled={unblockMember.isPending}
+              aria-label={restoring ? 'Восстанавливаю…' : 'Вернуть доступ'}
+            >
+              {restoring ? (
+                'Восст…'
+              ) : (
+                <>
+                  <span className="sm:hidden">Вернуть</span>
+                  <span className="hidden sm:inline">Вернуть доступ</span>
+                </>
+              )}
+            </Button>
+          </div>
+        )
+      },
     },
   ]
 
@@ -148,7 +177,13 @@ export function BlacklistPage() {
         />
       )}
       {!isLoading && !error && data && data.length === 0 && <EmptyState />}
-      {!isLoading && !error && data && data.length > 0 && (
+      {!isLoading && !error && data && data.length > 0 && filtered.length === 0 && (
+        <EmptyState
+          title="Ничего не найдено"
+          subtitle="Попробуйте другой поисковый запрос."
+        />
+      )}
+      {!isLoading && !error && data && filtered.length > 0 && (
         <>
           <DataTable
             columns={columns}

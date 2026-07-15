@@ -10,6 +10,17 @@ def test_mutating_endpoint_requires_api_key(api_client, db_path):
     assert response.status_code == 401
     assert response.json()["detail"] == "Invalid or missing API key"
 
+    patch_denied = api_client.patch(
+        "/api/members/1001",
+        json={
+            "game_nick": "X",
+            "real_name": "Y",
+            "discord_nick": None,
+            "perspective": "FPP",
+        },
+    )
+    assert patch_denied.status_code == 401
+
 
 def test_mutating_endpoint_rejects_wrong_api_key(api_client, db_path):
     seed_member_sync(db_path, 1001, track_in_group=True)

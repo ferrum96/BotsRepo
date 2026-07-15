@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { formatJoinDate, isLegacyJoinDate, perspectiveLabel } from './formatters'
+import { formatJoinDate, formatMemberCount } from './formatters'
 
 describe('formatJoinDate', () => {
   it('marks legacy join date', () => {
@@ -13,18 +13,13 @@ describe('formatJoinDate', () => {
   })
 })
 
-describe('isLegacyJoinDate', () => {
-  it('detects only the legacy sentinel', () => {
-    expect(isLegacyJoinDate('2001-01-01')).toBe(true)
-    expect(isLegacyJoinDate('2026-01-01')).toBe(false)
-  })
-})
-
-describe('perspectiveLabel', () => {
-  it('returns known labels and falls back to raw value', () => {
-    expect(perspectiveLabel('FPP')).toBe('FPP')
-    expect(perspectiveLabel('TPP')).toBe('TPP')
-    expect(perspectiveLabel('Mixed')).toBe('Mixed')
-    expect(perspectiveLabel('Other')).toBe('Other')
+describe('formatMemberCount', () => {
+  it('uses russian plural forms', () => {
+    expect(formatMemberCount(0)).toBe('0 участников')
+    expect(formatMemberCount(1)).toBe('1 участник')
+    expect(formatMemberCount(2)).toBe('2 участника')
+    expect(formatMemberCount(5)).toBe('5 участников')
+    expect(formatMemberCount(11)).toBe('11 участников')
+    expect(formatMemberCount(21)).toBe('21 участник')
   })
 })

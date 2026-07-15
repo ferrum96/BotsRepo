@@ -8,10 +8,12 @@ import { PageHeader } from '../components/layout/PageHeader'
 import { DataTable, type Column } from '../components/table/DataTable'
 import { Pagination } from '../components/table/Pagination'
 import { Button } from '../components/ui/Button'
+import { TelegramDmButton } from '../components/ui/TelegramDmButton'
 import { ConfirmModal } from '../components/ui/ConfirmModal'
 import { useConfirmAction } from '../hooks/useConfirmAction'
 import { useDebounce } from '../hooks/useDebounce'
-import { useInactiveMembers, useKickInactiveMember } from '../features/inactive/useInactiveMembers'
+import { useKickMember } from '../features/members/useMembers'
+import { useInactiveMembers } from '../features/inactive/useInactiveMembers'
 import { matchesTextQuery } from '../utils/query'
 
 const PAGE_SIZE = 25
@@ -46,11 +48,18 @@ export function InactiveMembersPage() {
   const [page, setPage] = useState(1)
   const debouncedSearch = useDebounce(search, 250)
   const { data, isLoading, error, refetch } = useInactiveMembers()
-  const kickMember = useKickInactiveMember()
+  const kickMember = useKickMember()
 
   const filtered = useMemo(() => {
     return (data || []).filter(
-      (member) => matchesTextQuery(debouncedSearch, member.real_name, member.game_nick, member.discord_nick)
+      (member) =>
+        matchesTextQuery(
+          debouncedSearch,
+          member.real_name,
+          member.game_nick,
+          member.discord_nick,
+          member.tg_username,
+        )
     )
   }, [data, debouncedSearch])
 
@@ -60,10 +69,19 @@ export function InactiveMembersPage() {
 
   const columns: Column<InactiveMember>[] = [
     {
+      key: 'tg',
+      header: '',
+      cell: (row) => (
+        <TelegramDmButton userId={row.user_id} tgUsername={row.tg_username} />
+      ),
+    },
+    {
       key: 'real_name',
       header: 'Имя',
+      headerClassName: 'hidden sm:table-cell',
+      cellClassName: 'hidden sm:table-cell',
       cell: (row) => (
-        <span className="inline-block max-w-[84px] truncate text-center sm:max-w-none">
+        <span className="inline-block max-w-[140px] truncate text-center md:max-w-none">
           {row.real_name}
         </span>
       ),
@@ -71,11 +89,21 @@ export function InactiveMembersPage() {
     {
       key: 'game_nick',
       header: 'Ник в игре',
-      cell: (row) => (
-        <span className="inline-block max-w-[84px] truncate text-center font-bold text-electric sm:max-w-none">
-          {row.game_nick}
-        </span>
-      ),
+      cell: (row) => {
+        const { agoText } = formatLastMatch(row.last_match_at)
+        return (
+          <div className="flex flex-col items-center justify-center gap-0.5">
+            <span className="inline-block max-w-[36vw] truncate text-center font-bold text-electric sm:max-w-[140px] md:max-w-none">
+              {row.game_nick}
+            </span>
+            {agoText && (
+              <span className="md:hidden text-[11px] text-on-surface-variant whitespace-nowrap">
+                {agoText.replace(/[()]/g, '')}
+              </span>
+            )}
+          </div>
+        )
+      },
     },
     {
       key: 'discord_nick',
@@ -87,17 +115,14 @@ export function InactiveMembersPage() {
     {
       key: 'last_match_at',
       header: 'Был в последний раз в игре',
+      headerClassName: 'hidden md:table-cell',
+      cellClassName: 'hidden md:table-cell',
       cell: (row) => {
         const { dateText, agoText } = formatLastMatch(row.last_match_at)
         return (
-          <span className="text-on-surface-variant text-[12px] sm:text-[13px]">
+          <span className="text-on-surface-variant text-[13px]">
             {dateText}
-            {agoText && (
-              <>
-                <span className="block sm:hidden">{agoText}</span>
-                <span className="hidden sm:inline"> {agoText}</span>
-              </>
-            )}
+            {agoText && <> {agoText}</>}
           </span>
         )
       },
@@ -105,16 +130,29 @@ export function InactiveMembersPage() {
     {
       key: 'kick',
       header: '',
-      cell: (row) => (
-        <Button
-          variant="ghost"
-          className="w-auto px-1.5 sm:px-2 py-1 text-[10px] sm:text-[12px] text-red-400 hover:text-red-300 hover:bg-red-950/30"
-          onClick={() => kickConfirm.openFor(row.user_id)}
-          disabled={kickMember.isPending}
-        >
-          {kickMember.isPending && kickMember.variables === row.user_id ? 'Удаляю…' : 'Удалить из группы'}
-        </Button>
-      ),
+      cell: (row) => {
+        const kicking = kickMember.isPending && kickMember.variables === row.user_id
+        return (
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-center gap-1 sm:gap-2">
+            <Button
+              variant="ghost"
+              className="min-h-9 w-full sm:w-auto px-2 py-1.5 text-[12px] text-red-400 hover:text-red-300 hover:bg-red-950/30 whitespace-nowrap"
+              onClick={() => kickConfirm.openFor(row.user_id)}
+              disabled={kickMember.isPending}
+              aria-label={kicking ? 'Удаляю…' : 'Удалить из группы'}
+            >
+              {kicking ? (
+                'Удаляю…'
+              ) : (
+                <>
+                  <span className="sm:hidden">Удалить</span>
+                  <span className="hidden sm:inline">Удалить из группы</span>
+                </>
+              )}
+            </Button>
+          </div>
+        )
+      },
     },
   ]
 
@@ -135,7 +173,13 @@ export function InactiveMembersPage() {
           subtitle="Игроки, которые не играли 7+ дней, появятся здесь автоматически."
         />
       )}
-      {!isLoading && !error && data && data.length > 0 && (
+      {!isLoading && !error && data && data.length > 0 && filtered.length === 0 && (
+        <EmptyState
+          title="Ничего не найдено"
+          subtitle="Попробуйте другой поисковый запрос."
+        />
+      )}
+      {!isLoading && !error && data && filtered.length > 0 && (
         <>
           <DataTable
             columns={columns}

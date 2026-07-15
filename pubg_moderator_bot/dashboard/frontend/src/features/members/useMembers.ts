@@ -3,15 +3,22 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   fetchMembers,
   kickMember,
+  updateMember,
+  type MemberUpdate,
 } from '../../api/client'
-
-const KEY = ['members']
+import {
+  BLACKLIST_KEY,
+  INACTIVE_KEY,
+  MEMBERS_KEY,
+  invalidateKeys,
+} from '../../utils/queryKeys'
 
 export function useMembers() {
   return useQuery({
-    queryKey: KEY,
+    queryKey: MEMBERS_KEY,
     queryFn: fetchMembers,
-    refetchInterval: 10 * 60 * 1000,
+    // Live updates arrive via WebSocket; keep a slow safety net.
+    refetchInterval: 5 * 60 * 1000,
   })
 }
 
@@ -20,10 +27,18 @@ export function useKickMember() {
   return useMutation({
     mutationFn: (userId: number) => kickMember(userId),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: KEY })
-      queryClient.invalidateQueries({ queryKey: ['inactive-members'] })
-      queryClient.invalidateQueries({ queryKey: ['blacklist'] })
-      queryClient.invalidateQueries({ queryKey: ['stats'] })
+      invalidateKeys(queryClient, MEMBERS_KEY, INACTIVE_KEY, BLACKLIST_KEY)
+    },
+  })
+}
+
+export function useUpdateMember() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ userId, payload }: { userId: number; payload: MemberUpdate }) =>
+      updateMember(userId, payload),
+    onSuccess: () => {
+      invalidateKeys(queryClient, MEMBERS_KEY, INACTIVE_KEY)
     },
   })
 }

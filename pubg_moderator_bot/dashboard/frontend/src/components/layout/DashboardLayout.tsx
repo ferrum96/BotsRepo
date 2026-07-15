@@ -34,7 +34,7 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
         className={`flex-1 flex flex-col min-h-screen transition-all duration-200 ${isDesktopCollapsed ? 'md:ml-[88px]' : 'md:ml-sidebar'
           }`}
       >
-        <header className="md:hidden sticky top-0 z-30 bg-[#060b14] border-b border-outline-level px-container py-3">
+        <header className="md:hidden sticky top-0 z-30 bg-[#060b14] border-b border-outline-level px-3 sm:px-container py-3">
           <div className="flex items-center justify-between">
             <button
               className="btn-ghost"
@@ -47,7 +47,7 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
             <div className="w-9" />
           </div>
         </header>
-        <main className="flex-1 p-container lg:p-stack-lg">
+        <main className="flex-1 min-w-0 overflow-x-hidden p-3 sm:p-container lg:p-stack-lg">
           {children}
         </main>
       </div>

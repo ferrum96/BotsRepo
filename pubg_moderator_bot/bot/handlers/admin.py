@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import html
 import logging
 from typing import TYPE_CHECKING
 
-from telegram import Bot, Update
+from telegram import Bot, ChatPermissions, Update
 from telegram.constants import ChatMemberStatus, ParseMode
 from telegram.error import BadRequest, Forbidden, TelegramError
 from telegram.ext import ContextTypes
@@ -13,19 +14,19 @@ from telegram.ext import ContextTypes
 from bot.activity_monitor import check_activity_on_join
 from bot import messages as msg
 from bot.database import Database
-from bot.group_titles import assign_game_nick_title, remove_from_group_header
+from bot.events import publish_dashboard_event
+from bot.group_titles import (
+    assign_game_nick_tag,
+    build_game_nick_tag,
+    normalize_game_nick,
+    remove_from_group_header,
+)
 
 if TYPE_CHECKING:
     from bot.config import Config
 
 logger = logging.getLogger(__name__)
 
-_PRESENT_STATUSES = {
-    ChatMemberStatus.MEMBER,
-    ChatMemberStatus.RESTRICTED,
-    ChatMemberStatus.ADMINISTRATOR,
-    ChatMemberStatus.OWNER,
-}
 _REMOVED_STATUSES = {
     ChatMemberStatus.LEFT,
     ChatMemberStatus.BANNED,
@@ -35,11 +36,52 @@ _REMOVED_STATUSES = {
 _soft_kick_user_ids: set[int] = set()
 
 
-def _normalize_game_nick(value: str) -> str:
-    nick = (value or "").strip()
-    while len(nick) >= 2 and nick.startswith("{") and nick.endswith("}"):
-        nick = nick[1:-1].strip()
-    return nick
+def _member_tag_from_chat_member(chat_member) -> str:
+    """Read live Telegram member tag (or legacy custom_title) from a ChatMember.
+
+    PTB <22.7 stores unknown Bot API fields (including ``tag``) in ``api_kwargs``
+    as a mappingproxy — must not require a plain ``dict``.
+    """
+    tag = getattr(chat_member, "tag", None) or ""
+    if not tag:
+        api_kwargs = getattr(chat_member, "api_kwargs", None)
+        if api_kwargs is not None:
+            try:
+                tag = api_kwargs.get("tag") or ""
+            except AttributeError:
+                tag = ""
+    if not tag:
+        tag = getattr(chat_member, "custom_title", None) or ""
+    return normalize_game_nick(tag)
+
+
+async def _sync_game_nick_from_member_tag(
+    db: Database,
+    user_id: int,
+    chat_member,
+) -> bool:
+    """If Telegram member tag drifted from DB game_nick, update the dashboard."""
+    live_tag = _member_tag_from_chat_member(chat_member)
+    if not live_tag:
+        return False
+
+    member = await db.get_member(user_id)
+    if not member:
+        return False
+
+    expected = build_game_nick_tag(member.game_nick)
+    if live_tag == expected or live_tag == normalize_game_nick(member.game_nick):
+        return False
+
+    updated = await db.update_member_game_nick(user_id, live_tag)
+    if updated:
+        logger.info(
+            "Synced game_nick for user %s from Telegram tag '%s' (was '%s')",
+            user_id,
+            live_tag,
+            member.game_nick,
+        )
+    return updated
 
 
 def _get_db(context: ContextTypes.DEFAULT_TYPE) -> Database:
@@ -75,12 +117,12 @@ async def sync_group_members_state(
                 continue
 
             guessed_nick = (
-                getattr(admin, "custom_title", None)
+                _member_tag_from_chat_member(admin)
                 or admin.user.username
                 or admin.user.first_name
                 or f"user_{admin.user.id}"
             )
-            guessed_nick = _normalize_game_nick(guessed_nick)
+            guessed_nick = normalize_game_nick(guessed_nick)
             await db.save_member(
                 user_id=admin.user.id,
                 tg_username=admin.user.username,
@@ -135,11 +177,8 @@ async def sync_group_members_state(
         imported += 1
         member = await db.get_member(user.id)
         if member and member.game_nick and not config.is_admin(user.id):
-            await assign_game_nick_title(
-                bot,
-                config.group_id,
-                user.id,
-                member.game_nick,
+            await assign_game_nick_tag(
+                bot, config.group_id, user.id, member.game_nick
             )
             await check_activity_on_join(bot, db, config, member)
 
@@ -175,7 +214,29 @@ async def sync_group_members_state(
         await db.track_group_member(member.user_id)
         present += 1
 
-    return {
+        # Mirror live TG tag/custom_title into DB for everyone (member/admin/owner).
+        await _sync_game_nick_from_member_tag(db, member.user_id, chat_member)
+
+        # Auto-assign setChatMemberTag only for regular members — not bot admins
+        # and not Telegram administrators/owner (they use admin titles / tag UI).
+        if member.user_id in admin_ids:
+            continue
+        if chat_member.status not in (
+            ChatMemberStatus.MEMBER,
+            ChatMemberStatus.RESTRICTED,
+        ):
+            continue
+
+        live = _member_tag_from_chat_member(chat_member)
+        if live:
+            # Manual / existing TG tag wins — already mirrored into DB above.
+            continue
+        refreshed = await db.get_member(member.user_id)
+        nick = refreshed.game_nick if refreshed else member.game_nick
+        if nick:
+            await assign_game_nick_tag(bot, config.group_id, member.user_id, nick)
+
+    result = {
         "total": len(members),
         "present": present,
         "missing": missing,
@@ -186,6 +247,17 @@ async def sync_group_members_state(
         "imported_admins": imported_admins,
         "import_admin_errors": imported_admin_errors,
     }
+    await publish_dashboard_event(
+        config,
+        {
+            "type": "dashboard.refresh",
+            "reason": "sync",
+            "present": present,
+            "missing": missing,
+            "blacklisted": blacklisted,
+        },
+    )
+    return result
 
 
 def _is_admin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
@@ -201,11 +273,16 @@ async def _reply_admin_only(update: Update) -> None:
 
 
 def _format_member_line(member) -> str:
-    tg = member.tg_username or member.tg_first_name or str(member.user_id)
-    discord = member.discord_nick or "—"
+    tg = html.escape(
+        member.tg_username or member.tg_first_name or str(member.user_id)
+    )
+    discord = html.escape(member.discord_nick or "—")
+    game_nick = html.escape(member.game_nick)
+    real_name = html.escape(member.real_name)
+    perspective = html.escape(member.perspective)
     return (
-        f"• <b>{member.game_nick}</b> — {member.real_name}\n"
-        f"  TG: @{tg} | Discord: {discord} | {member.perspective}"
+        f"• <b>{game_nick}</b> — {real_name}\n"
+        f"  TG: @{tg} | Discord: {discord} | {perspective}"
     )
 
 
@@ -230,7 +307,7 @@ async def _refresh_member_tg_profile(db: Database, user) -> None:
     existing = await db.get_member(user.id)
     if not existing:
         return
-    normalized_nick = _normalize_game_nick(existing.game_nick)
+    normalized_nick = normalize_game_nick(existing.game_nick)
     await db.save_member(
         user_id=user.id,
         tg_username=user.username,
@@ -368,6 +445,62 @@ async def _reject_unauthorized_join(
     await db.untrack_group_member(user_id)
 
 
+async def _apply_default_member_permissions(
+    bot: Bot,
+    config: "Config",
+    user_id: int,
+) -> bool:
+    """Restrict new members to messages + full media only.
+
+    Allowed: text, all media (10/10), polls, stickers/GIFs, reactions, link previews.
+    Denied: invite, pin, change info, edit own tag, topics.
+    Skipped for configured bot admins.
+    """
+    if config.is_admin(user_id):
+        return False
+
+    permissions = ChatPermissions(
+        can_send_messages=True,
+        can_send_audios=True,
+        can_send_documents=True,
+        can_send_photos=True,
+        can_send_videos=True,
+        can_send_video_notes=True,
+        can_send_voice_notes=True,
+        can_add_web_page_previews=True,
+        can_send_polls=True,
+        can_send_other_messages=True,  # stickers & GIFs
+        can_change_info=False,
+        can_invite_users=False,
+        can_pin_messages=False,
+        can_manage_topics=False,
+        # PTB 21.x: Bot API fields not yet typed.
+        api_kwargs={
+            "can_edit_tag": False,
+            "can_react_to_messages": True,
+        },
+    )
+    try:
+        await bot.restrict_chat_member(
+            chat_id=config.group_id,
+            user_id=user_id,
+            permissions=permissions,
+        )
+        logger.info(
+            "Applied default member permissions for user %s in chat %s",
+            user_id,
+            config.group_id,
+        )
+        return True
+    except (BadRequest, Forbidden, TelegramError) as exc:
+        logger.warning(
+            "Failed to restrict permissions for user %s: %s",
+            user_id,
+            exc,
+        )
+        return False
+
+
 async def _handle_vetted_group_join(
     bot: Bot,
     config: "Config",
@@ -387,14 +520,11 @@ async def _handle_vetted_group_join(
             await _reject_unauthorized_join(bot, config, db, user.id)
             return
 
+    await _apply_default_member_permissions(bot, config, user.id)
+
     member = await db.get_member(user.id)
     if member and member.game_nick and not config.is_admin(user.id):
-        await assign_game_nick_title(
-            bot,
-            config.group_id,
-            user.id,
-            member.game_nick,
-        )
+        await assign_game_nick_tag(bot, config.group_id, user.id, member.game_nick)
         await check_activity_on_join(bot, db, config, member)
 
 
@@ -468,14 +598,17 @@ async def cmd_search(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
 
     query = " ".join(context.args)
     members = await _get_db(context).search_members(query)
+    safe_query = html.escape(query)
 
     if not members:
         if update.message:
-            await update.message.reply_text(f"По запросу «{query}» ничего не найдено.")
+            await update.message.reply_text(
+                f"По запросу «{safe_query}» ничего не найдено."
+            )
         return
 
     lines = [_format_member_line(m) for m in members]
-    text = f"<b>Результаты поиска «{query}»:</b>\n\n" + "\n".join(lines)
+    text = f"<b>Результаты поиска «{safe_query}»:</b>\n\n" + "\n".join(lines)
 
     if update.message:
         await update.message.reply_text(text, parse_mode=ParseMode.HTML)
@@ -492,7 +625,10 @@ async def cmd_blacklist(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             await update.message.reply_text("Чёрный список пуст.")
         return
 
-    lines = [f"• ID <code>{uid}</code> — {reason}" for uid, reason, _ in entries]
+    lines = [
+        f"• ID <code>{uid}</code> — {html.escape(reason)}"
+        for uid, reason, _ in entries
+    ]
     text = f"<b>Чёрный список ({len(entries)}):</b>\n\n" + "\n".join(lines)
 
     if update.message:
@@ -616,8 +752,7 @@ async def cmd_help_admin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         "/unblacklist &lt;user_id&gt; — снять блокировку\n"
         "/kick_non_members — удалить не-участников из группы\n"
         "/sync_group — синхронизировать фактический состав группы\n"
-        "/assign_titles — проставить игровые ники как теги "
-        "всем участникам группы\n"
+        "/assign_titles — проставить игровые ники как member tag всем участникам\n"
         "/admin_help — эта справка"
     )
     if update.message:
@@ -627,11 +762,7 @@ async def cmd_help_admin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 async def cmd_assign_titles(
     update: Update, context: ContextTypes.DEFAULT_TYPE
 ) -> None:
-    """Bulk-assign game nick as custom_title for everyone in the members DB.
-
-    Iterates over clan members (not group_members) so it works even for users
-    who joined the group before the bot started tracking chat_member updates.
-    """
+    """Bulk-assign game nick as Telegram member tag for clan members."""
     if not _is_admin(update, context):
         await _reply_admin_only(update)
         return
@@ -653,7 +784,7 @@ async def cmd_assign_titles(
         return
 
     await update.message.reply_text(
-        f"Проставляю теги {len(members)} участникам…"
+        f"Проставляю member tag {len(members)} участникам…"
     )
 
     assigned = 0
@@ -687,7 +818,7 @@ async def cmd_assign_titles(
             not_in_group += 1
             continue
 
-        ok = await assign_game_nick_title(
+        ok = await assign_game_nick_tag(
             bot, config.group_id, member.user_id, member.game_nick
         )
         if ok:
@@ -826,6 +957,43 @@ async def on_chat_member_update(
             sync_result["blacklisted"],
             sync_result["errors"],
         )
+        return
+
+    # Keep dashboard game_nick in sync with manual Telegram tag/title edits.
+    # Works for regular members, administrators and owner (admin/owner edit UI).
+    if (
+        new_status
+        in (
+            ChatMemberStatus.MEMBER,
+            ChatMemberStatus.RESTRICTED,
+            ChatMemberStatus.ADMINISTRATOR,
+            ChatMemberStatus.OWNER,
+        )
+        and await db.is_member(user.id)
+    ):
+        old_tag = _member_tag_from_chat_member(update.chat_member.old_chat_member)
+        new_tag = _member_tag_from_chat_member(update.chat_member.new_chat_member)
+        synced = await _sync_game_nick_from_member_tag(
+            db, user.id, update.chat_member.new_chat_member
+        )
+        if synced:
+            logger.info(
+                "Dashboard game_nick updated from manual TG tag for user %s "
+                "('%s' -> '%s') status=%s",
+                user.id,
+                old_tag,
+                new_tag,
+                new_status,
+            )
+            await publish_dashboard_event(
+                config,
+                {
+                    "type": "members.changed",
+                    "reason": "tag_sync",
+                    "user_id": user.id,
+                    "game_nick": new_tag,
+                },
+            )
 
 
 async def on_group_membership_message_event(
@@ -842,10 +1010,13 @@ async def on_group_membership_message_event(
     db = _get_db(context)
     changed = False
 
+    soft_kicked_left_id: int | None = None
     if update.message.left_chat_member and not update.message.left_chat_member.is_bot:
         left_id = update.message.left_chat_member.id
         await db.untrack_group_member(left_id)
-        _soft_kick_user_ids.discard(left_id)
+        # Keep soft-kick marker through sync (same race as chat_member path).
+        if left_id in _soft_kick_user_ids:
+            soft_kicked_left_id = left_id
         changed = True
 
     if update.message.new_chat_members:
@@ -867,6 +1038,8 @@ async def on_group_membership_message_event(
         return
 
     sync_result = await sync_group_members_state(context.bot, db, config)
+    if soft_kicked_left_id is not None:
+        _soft_kick_user_ids.discard(soft_kicked_left_id)
     logger.info(
         "Fallback message sync: total=%s present=%s missing=%s blacklisted=%s errors=%s",
         sync_result["total"],

@@ -134,6 +134,57 @@ async def test_get_member_join_date_legacy_and_fallback(db: Database):
     assert await get_member_join_date(db, member) == member.created_at
 
 
+async def test_update_member_profile_preserves_created_at(db: Database):
+    await seed_member(db, 11, game_nick="Old", real_name="Ivan", track_in_group=False)
+    before = await db.get_member(11)
+    assert before is not None
+
+    ok = await db.update_member_profile(
+        11,
+        game_nick="New",
+        real_name="Petr",
+        discord_nick="p#1",
+        perspective="TPP",
+    )
+    assert ok is True
+    after = await db.get_member(11)
+    assert after is not None
+    assert after.game_nick == "New"
+    assert after.real_name == "Petr"
+    assert after.discord_nick == "p#1"
+    assert after.perspective == "TPP"
+    assert after.created_at == before.created_at
+
+
+async def test_save_member_preserves_created_at_on_conflict(db: Database):
+    await seed_member(db, 13, game_nick="Nick", real_name="Ivan", track_in_group=False)
+    before = await db.get_member(13)
+    assert before is not None
+
+    await db.save_member(
+        user_id=13,
+        tg_username="new_user",
+        tg_first_name="New",
+        game_nick="Nick",
+        real_name="Ivan",
+        discord_nick=None,
+        perspective="FPP",
+    )
+    after = await db.get_member(13)
+    assert after is not None
+    assert after.tg_username == "new_user"
+    assert after.created_at == before.created_at
+
+
+async def test_update_member_game_nick(db: Database):
+    await seed_member(db, 12, game_nick="OldNick", track_in_group=False)
+    assert await db.update_member_game_nick(12, "LiveTitle") is True
+    member = await db.get_member(12)
+    assert member is not None
+    assert member.game_nick == "LiveTitle"
+    assert await db.update_member_game_nick(999, "X") is False
+
+
 async def test_blacklist_upsert_updates_reason(db: Database):
     await db.add_to_blacklist(9, "survey_failed")
     await db.add_to_blacklist(9, "kicked_from_dashboard")
