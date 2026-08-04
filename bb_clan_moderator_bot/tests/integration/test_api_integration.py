@@ -108,18 +108,17 @@ def test_kick_member_happy_path(api_client, auth_headers, db_path, telegram_tran
     assert response.status_code == 200
     assert response.json() == {"ok": True}
 
-    blacklist = api_client.get("/api/blacklist").json()
-    assert any(row["user_id"] == 1001 for row in blacklist)
+    assert api_client.get("/api/blacklist").json() == []
     members = api_client.get("/api/members").json()
     assert all(row["user_id"] != 1001 for row in members)
 
-    # Hard ban must stick: ban without follow-up unban (blocks invite rejoins).
+    # Soft kick: ban then unban so invite rejoin is possible after survey.
     paths = [path for _method, path in telegram_transport.calls]
     assert any(path.endswith("/banChatMember") for path in paths)
-    assert not any(path.endswith("/unbanChatMember") for path in paths)
+    assert any(path.endswith("/unbanChatMember") for path in paths)
 
 
-def test_kick_already_left_member_hard_bans(
+def test_kick_already_left_member_only_deletes_db(
     api_client, auth_headers, db_path, telegram_transport
 ):
     seed_member_sync(db_path, 1002, track_in_group=True)
@@ -130,10 +129,10 @@ def test_kick_already_left_member_hard_bans(
     assert response.json() == {"ok": True}
 
     paths = [path for _method, path in telegram_transport.calls]
-    assert any(path.endswith("/banChatMember") for path in paths)
-    assert not any(path.endswith("/unbanChatMember") for path in paths)
-    assert any(
-        row["user_id"] == 1002 for row in api_client.get("/api/blacklist").json()
+    assert not any(path.endswith("/banChatMember") for path in paths)
+    assert api_client.get("/api/blacklist").json() == []
+    assert all(
+        row["user_id"] != 1002 for row in api_client.get("/api/members").json()
     )
 
 

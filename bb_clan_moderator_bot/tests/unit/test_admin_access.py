@@ -6,14 +6,17 @@ from telegram.constants import ChatMemberStatus
 from bot.config import Config
 from bot.database import Database, SurveyProgress
 from bot.handlers.admin import (
+    _mark_recently_left,
     _may_enter_group,
     _promote_from_completed_survey,
+    _recently_left_user_ids,
     _reject_unauthorized_join,
     _soft_kick_user_ids,
     ban_user_in_group,
     enforce_blacklist_telegram_bans,
     on_chat_join_request,
     on_chat_member_update,
+    sync_group_members_state,
 )
 from tests.conftest import GROUP_ID, seed_member
 
@@ -320,7 +323,9 @@ async def test_soft_kick_banned_event_does_not_blacklist(
     assert 410 not in await db.get_group_member_ids()
 
 
-async def test_admin_ban_event_adds_blacklist(db: Database, mock_context, monkeypatch):
+async def test_admin_ban_event_deletes_member_without_blacklist(
+    db: Database, mock_context, monkeypatch
+):
     await seed_member(db, 411, track_in_group=True)
     _soft_kick_user_ids.discard(411)
     monkeypatch.setattr(
@@ -343,23 +348,24 @@ async def test_admin_ban_event_adds_blacklist(db: Database, mock_context, monkey
     )
     await on_chat_member_update(update, mock_context)
 
-    assert await db.is_blacklisted(411) is True
+    assert await db.is_blacklisted(411) is False
+    assert await db.is_member(411) is False
+    assert 411 not in await db.get_group_member_ids()
 
 
 async def test_voluntary_leave_does_not_blacklist(db: Database, mock_context, monkeypatch):
     await seed_member(db, 412, track_in_group=True)
-    monkeypatch.setattr(
-        "bot.handlers.admin.sync_group_members_state",
-        AsyncMock(
-            return_value={
-                "total": 0,
-                "present": 0,
-                "missing": 0,
-                "blacklisted": 0,
-                "errors": 0,
-            }
-        ),
+    _recently_left_user_ids.clear()
+    sync_mock = AsyncMock(
+        return_value={
+            "total": 0,
+            "present": 0,
+            "missing": 0,
+            "blacklisted": 0,
+            "errors": 0,
+        }
     )
+    monkeypatch.setattr("bot.handlers.admin.sync_group_members_state", sync_mock)
 
     update = _member_update(
         user_id=412,
@@ -369,6 +375,39 @@ async def test_voluntary_leave_does_not_blacklist(db: Database, mock_context, mo
     await on_chat_member_update(update, mock_context)
 
     assert await db.is_blacklisted(412) is False
+    assert await db.is_member(412) is False
+    assert 412 not in await db.get_group_member_ids()
+    progress = await db.get_progress(412)
+    assert progress is not None and progress.step == "completed"
+    assert 412 in _recently_left_user_ids
+    sync_mock.assert_awaited()
+    assert sync_mock.await_args.kwargs.get("backfill_completed_surveys") is False
+
+
+async def test_sync_skips_survey_backfill_for_recently_left(
+    db: Database, config: Config
+):
+    _recently_left_user_ids.clear()
+    await db.set_progress(
+        SurveyProgress(
+            user_id=413,
+            step="completed",
+            game_nick="Gone",
+            real_name="Gone",
+            perspective="FPP",
+        )
+    )
+    _mark_recently_left(413)
+
+    bot = AsyncMock()
+    chat_member = MagicMock()
+    chat_member.status = ChatMemberStatus.MEMBER
+    chat_member.user = _User(413, username="gone", first_name="Gone")
+    bot.get_chat_member = AsyncMock(return_value=chat_member)
+
+    result = await sync_group_members_state(bot, db, config)
+    assert result["imported"] == 0
+    assert await db.is_member(413) is False
 
 
 async def test_join_request_blacklisted_declines_and_bans(

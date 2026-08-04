@@ -45,6 +45,11 @@ class Config:
     dashboard_api_key: str = ""
     dashboard_events_url: str = ""
     group_sync_interval_minutes: int = 10
+    # Telethon (my.telegram.org) — required to list all group participants.
+    telegram_api_id: int = 0
+    telegram_api_hash: str = ""
+    full_member_sync_on_empty: bool = True
+    full_member_sync_force: bool = False
 
     @classmethod
     def from_env(cls) -> "Config":
@@ -56,6 +61,7 @@ class Config:
         if not group_id:
             raise ValueError("GROUP_ID is required")
 
+        api_id_raw = os.getenv("TELEGRAM_API_ID", "").strip()
         return cls(
             bot_token=token,
             group_id=int(group_id),
@@ -73,10 +79,21 @@ class Config:
             group_sync_interval_minutes=int(
                 os.getenv("GROUP_SYNC_INTERVAL_MINUTES", "10")
             ),
+            telegram_api_id=int(api_id_raw) if api_id_raw else 0,
+            telegram_api_hash=os.getenv("TELEGRAM_API_HASH", "").strip(),
+            full_member_sync_on_empty=_env_bool("FULL_MEMBER_SYNC_ON_EMPTY", True),
+            full_member_sync_force=_env_bool("FULL_MEMBER_SYNC", False),
         )
 
     def is_admin(self, user_id: int) -> bool:
         return user_id in self.admin_ids
+
+
+def _env_bool(name: str, default: bool = False) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _normalize_tg_username(raw: str) -> str:

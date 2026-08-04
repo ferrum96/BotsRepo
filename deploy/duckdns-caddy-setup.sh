@@ -7,7 +7,7 @@ Usage:
   ./deploy/duckdns-caddy-setup.sh [options]
 
 Options:
-  --gateway-domain DOMAIN   Main HTTPS domain (e.g. fkandu.duckdns.org)
+  --gateway-domain DOMAIN   Main HTTPS domain (e.g. kanban-board.duckdns.org)
   --subdomain NAME          Shorthand for NAME.duckdns.org
   --single-upstream PORT    Single-app mode: proxy / to localhost:PORT
                             (default: disabled; gateway mode is used)
@@ -18,8 +18,8 @@ Options:
   --help                    Show this help
 
 Examples:
-  ./deploy/duckdns-caddy-setup.sh --gateway-domain fkandu.duckdns.org --email admin@example.com
-  ./deploy/duckdns-caddy-setup.sh --subdomain fkandu
+  ./deploy/duckdns-caddy-setup.sh --gateway-domain kanban-board.duckdns.org --email admin@example.com
+  ./deploy/duckdns-caddy-setup.sh --subdomain kanban-board
 USAGE
 }
 
@@ -93,19 +93,22 @@ ROUTE_HELPER_PATH="/usr/local/bin/caddy-route"
 
 # Default ports (fallbacks)
 PORT_KANBAN=3002
+PORT_BB_CLAN_API=8080
+PORT_PUBG_API=8080
 PORT_FKANDU_DASHBOARD=3000
 PORT_FKANDU_API=8000
 PORT_FKANDU_BOT_FILES=8088
-PORT_PUBG_API=8080
 PORT_DEPLOY_WEBHOOK=9000
 DEPLOY_WEBHOOK_PATH="/hooks/deploy"
 PORT_DEPLOY_WEBHOOK_PUBLIC=450
+# FKandu path/host routes off by default (units in deploy/systemd/disabled/)
+ENABLE_FKANDU="${ENABLE_FKANDU:-0}"
 
 # Optional domains (configured in deploy/domains.env)
 GATEWAY_DOMAIN=""
 SERVICE_DOMAIN_KANBAN=""
-SERVICE_DOMAIN_FKANDU=""
 SERVICE_DOMAIN_BB_CLAN=""
+SERVICE_DOMAIN_FKANDU=""
 SERVICE_DOMAIN_FKANDU_DASHBOARD=""
 SERVICE_DOMAIN_FKANDU_API=""
 SERVICE_DOMAIN_FKANDU_FILES=""
@@ -132,33 +135,33 @@ if [[ -z "${GATEWAY_DOMAIN}" ]]; then
   exit 1
 fi
 
-# Preferred vars:
-# - SERVICE_DOMAIN_FKANDU
-# - SERVICE_DOMAIN_BB_CLAN
-# Backward compatibility is kept for older vars.
+# Preferred: SERVICE_DOMAIN_BB_CLAN. Legacy: SERVICE_DOMAIN_PUBG.
+EFFECTIVE_SERVICE_DOMAIN_BB_CLAN="${SERVICE_DOMAIN_BB_CLAN}"
+if [[ -z "${EFFECTIVE_SERVICE_DOMAIN_BB_CLAN}" ]]; then
+  EFFECTIVE_SERVICE_DOMAIN_BB_CLAN="${SERVICE_DOMAIN_PUBG}"
+fi
+
 EFFECTIVE_SERVICE_DOMAIN_FKANDU_DASHBOARD="${SERVICE_DOMAIN_FKANDU_DASHBOARD}"
 if [[ -z "${EFFECTIVE_SERVICE_DOMAIN_FKANDU_DASHBOARD}" ]]; then
   EFFECTIVE_SERVICE_DOMAIN_FKANDU_DASHBOARD="${SERVICE_DOMAIN_FKANDU}"
 fi
 
-EFFECTIVE_SERVICE_DOMAIN_PUBG="${SERVICE_DOMAIN_PUBG}"
-if [[ -z "${EFFECTIVE_SERVICE_DOMAIN_PUBG}" ]]; then
-  EFFECTIVE_SERVICE_DOMAIN_PUBG="${SERVICE_DOMAIN_BB_CLAN}"
+EFFECTIVE_BB_CLAN_PORT="${PORT_BB_CLAN_API:-${PORT_PUBG_API:-8080}}"
+
+if [[ "${ENABLE_FKANDU}" = "1" ]]; then
+  warn_if_domain_matches_gateway() {
+    local svc_name="$1"
+    local svc_domain="$2"
+    local expected_path="$3"
+    if [[ -n "${svc_domain}" && "${svc_domain}" == "${GATEWAY_DOMAIN}" ]]; then
+      echo "Warning: ${svc_name} domain equals GATEWAY_DOMAIN (${GATEWAY_DOMAIN})."
+      echo "         Leave ${svc_name} empty to keep path route https://${GATEWAY_DOMAIN}${expected_path}"
+    fi
+  }
+  warn_if_domain_matches_gateway "SERVICE_DOMAIN_FKANDU" "${EFFECTIVE_SERVICE_DOMAIN_FKANDU_DASHBOARD}" "/dashboard"
+  warn_if_domain_matches_gateway "SERVICE_DOMAIN_FKANDU_API" "${SERVICE_DOMAIN_FKANDU_API}" "/api"
+  warn_if_domain_matches_gateway "SERVICE_DOMAIN_FKANDU_FILES" "${SERVICE_DOMAIN_FKANDU_FILES}" "/files"
 fi
-
-warn_if_fkandu_domain_matches_gateway() {
-  local svc_name="$1"
-  local svc_domain="$2"
-  local expected_path="$3"
-  if [[ -n "${svc_domain}" && "${svc_domain}" == "${GATEWAY_DOMAIN}" ]]; then
-    echo "Warning: ${svc_name} domain equals GATEWAY_DOMAIN (${GATEWAY_DOMAIN})."
-    echo "         Leave ${svc_name} empty to keep path route https://${GATEWAY_DOMAIN}${expected_path}"
-  fi
-}
-
-warn_if_fkandu_domain_matches_gateway "SERVICE_DOMAIN_FKANDU" "${EFFECTIVE_SERVICE_DOMAIN_FKANDU_DASHBOARD}" "/dashboard"
-warn_if_fkandu_domain_matches_gateway "SERVICE_DOMAIN_FKANDU_API" "${SERVICE_DOMAIN_FKANDU_API}" "/api"
-warn_if_fkandu_domain_matches_gateway "SERVICE_DOMAIN_FKANDU_FILES" "${SERVICE_DOMAIN_FKANDU_FILES}" "/files"
 
 should_add_gateway_path() {
   local service_domain="$1"
@@ -278,29 +281,41 @@ fi
 # Always expose deploy webhook on HTTPS gateway (GitHub cannot use closed :449 after ufw).
 write_route "deploy-webhook" "${DEPLOY_WEBHOOK_PATH}" "127.0.0.1:${PORT_DEPLOY_WEBHOOK}"
 
+# When kanban has no dedicated host, it is the default site on GATEWAY_DOMAIN (/).
+KANBAN_ON_GATEWAY=0
+if should_add_gateway_path "${SERVICE_DOMAIN_KANBAN}"; then
+  KANBAN_ON_GATEWAY=1
+fi
+
 if [[ "${SKIP_DEFAULT_ROUTES}" = "0" ]]; then
-  if should_add_gateway_path "${SERVICE_DOMAIN_KANBAN}"; then
-    write_route "kanban" "/kanban" "127.0.0.1:${PORT_KANBAN}"
+  # Kanban on gateway → default fallback below (site root /), not /kanban path.
+  if should_add_gateway_path "${EFFECTIVE_SERVICE_DOMAIN_BB_CLAN}"; then
+    write_route "bb-clan" "/bb-clan" "127.0.0.1:${EFFECTIVE_BB_CLAN_PORT}"
   fi
-  if should_add_gateway_path "${EFFECTIVE_SERVICE_DOMAIN_FKANDU_DASHBOARD}"; then
-    write_next_dashboard_route "fkandu-dashboard" "/dashboard" "127.0.0.1:${PORT_FKANDU_DASHBOARD}"
-  fi
-  if should_add_gateway_path "${SERVICE_DOMAIN_FKANDU_API}"; then
-    write_preserve_route "fkandu-api" "/api" "127.0.0.1:${PORT_FKANDU_API}"
-  fi
-  if should_add_gateway_path "${SERVICE_DOMAIN_FKANDU_FILES}"; then
-    write_preserve_route "fkandu-files" "/files" "127.0.0.1:${PORT_FKANDU_BOT_FILES}"
-  fi
-  if should_add_gateway_path "${EFFECTIVE_SERVICE_DOMAIN_PUBG}"; then
-    write_route "pubg" "/pubg" "127.0.0.1:${PORT_PUBG_API}"
+  if [[ "${ENABLE_FKANDU}" = "1" ]]; then
+    if should_add_gateway_path "${EFFECTIVE_SERVICE_DOMAIN_FKANDU_DASHBOARD}"; then
+      write_next_dashboard_route "fkandu-dashboard" "/dashboard" "127.0.0.1:${PORT_FKANDU_DASHBOARD}"
+    fi
+    if should_add_gateway_path "${SERVICE_DOMAIN_FKANDU_API}"; then
+      write_preserve_route "fkandu-api" "/api" "127.0.0.1:${PORT_FKANDU_API}"
+    fi
+    if should_add_gateway_path "${SERVICE_DOMAIN_FKANDU_FILES}"; then
+      write_preserve_route "fkandu-files" "/files" "127.0.0.1:${PORT_FKANDU_BOT_FILES}"
+    fi
   fi
 fi
 
 UPSTREAM_KANBAN="127.0.0.1:${PORT_KANBAN}"
+UPSTREAM_BB_CLAN="127.0.0.1:${EFFECTIVE_BB_CLAN_PORT}"
 UPSTREAM_FKANDU_DASHBOARD="127.0.0.1:${PORT_FKANDU_DASHBOARD}"
 UPSTREAM_FKANDU_API="127.0.0.1:${PORT_FKANDU_API}"
 UPSTREAM_FKANDU_FILES="127.0.0.1:${PORT_FKANDU_BOT_FILES}"
-UPSTREAM_PUBG="127.0.0.1:${PORT_PUBG_API}"
+
+if [[ "${KANBAN_ON_GATEWAY}" = "1" ]]; then
+  GATEWAY_FALLBACK="reverse_proxy ${UPSTREAM_KANBAN}"
+else
+  GATEWAY_FALLBACK='respond "Route is not configured. Use /<service> path." 404'
+fi
 
 TMP_CADDYFILE="$(mktemp)"
 
@@ -326,7 +341,7 @@ ${GATEWAY_DOMAIN} {
     import ${ROUTES_DIR}/*.caddy
 
     handle {
-        respond "Route is not configured. Use /<service> path." 404
+        ${GATEWAY_FALLBACK}
     }
 }
 EOF
@@ -348,17 +363,19 @@ ${GATEWAY_DOMAIN} {
     import ${ROUTES_DIR}/*.caddy
 
     handle {
-        respond "Route is not configured. Use /<service> path." 404
+        ${GATEWAY_FALLBACK}
     }
 }
 EOF
 fi
 
 append_domain_proxy_block "${TMP_CADDYFILE}" "${SERVICE_DOMAIN_KANBAN}" "${UPSTREAM_KANBAN}" "kanban"
-append_domain_proxy_block "${TMP_CADDYFILE}" "${EFFECTIVE_SERVICE_DOMAIN_FKANDU_DASHBOARD}" "${UPSTREAM_FKANDU_DASHBOARD}" "fkandu-dashboard"
-append_domain_proxy_block "${TMP_CADDYFILE}" "${SERVICE_DOMAIN_FKANDU_API}" "${UPSTREAM_FKANDU_API}" "fkandu-api"
-append_domain_proxy_block "${TMP_CADDYFILE}" "${SERVICE_DOMAIN_FKANDU_FILES}" "${UPSTREAM_FKANDU_FILES}" "fkandu-files"
-append_domain_proxy_block "${TMP_CADDYFILE}" "${EFFECTIVE_SERVICE_DOMAIN_PUBG}" "${UPSTREAM_PUBG}" "pubg"
+append_domain_proxy_block "${TMP_CADDYFILE}" "${EFFECTIVE_SERVICE_DOMAIN_BB_CLAN}" "${UPSTREAM_BB_CLAN}" "bb-clan"
+if [[ "${ENABLE_FKANDU}" = "1" ]]; then
+  append_domain_proxy_block "${TMP_CADDYFILE}" "${EFFECTIVE_SERVICE_DOMAIN_FKANDU_DASHBOARD}" "${UPSTREAM_FKANDU_DASHBOARD}" "fkandu-dashboard"
+  append_domain_proxy_block "${TMP_CADDYFILE}" "${SERVICE_DOMAIN_FKANDU_API}" "${UPSTREAM_FKANDU_API}" "fkandu-api"
+  append_domain_proxy_block "${TMP_CADDYFILE}" "${SERVICE_DOMAIN_FKANDU_FILES}" "${UPSTREAM_FKANDU_FILES}" "fkandu-files"
+fi
 
 run cp "${TMP_CADDYFILE}" "${CADDYFILE_PATH}"
 rm -f "${TMP_CADDYFILE}"
@@ -371,6 +388,12 @@ echo "==> Validating and restarting Caddy"
 run caddy validate --config "${CADDYFILE_PATH}"
 run systemctl enable --now caddy
 run systemctl restart caddy
+sleep 1
+if ! systemctl is-active --quiet caddy; then
+  echo "ERROR: caddy failed to start" >&2
+  run journalctl -u caddy -n 40 --no-pager || true
+  exit 1
+fi
 
 if [[ "${SKIP_FIREWALL}" = "0" ]]; then
   echo "==> Configuring UFW"
@@ -383,11 +406,41 @@ if [[ "${SKIP_FIREWALL}" = "0" ]]; then
 fi
 
 echo "==> Health checks"
-echo "Gateway resolve:"
-dig +short "${GATEWAY_DOMAIN}" || true
+echo "Caddy local listeners:"
+ss -tlnp 2>/dev/null | grep -E ':80 |:443 ' || netstat -tlnp 2>/dev/null | grep -E ':80 |:443 ' || true
 
-echo "HTTPS check (certificate issuance may take a few minutes):"
-curl -I --max-time 20 "https://${GATEWAY_DOMAIN}" || true
+SERVER_IP="$(curl -4 -fsS --max-time 5 ifconfig.me 2>/dev/null || curl -4 -fsS --max-time 5 icanhazip.com 2>/dev/null || true)"
+SERVER_IP="$(echo "${SERVER_IP}" | tr -d '[:space:]')"
+GATEWAY_IP="$(dig +short "${GATEWAY_DOMAIN}" A | tail -n1 || true)"
+echo "Server public IP: ${SERVER_IP:-unknown}"
+echo "Gateway resolve (${GATEWAY_DOMAIN}): ${GATEWAY_IP:-none}"
+if [[ -n "${SERVER_IP}" && -n "${GATEWAY_IP}" && "${SERVER_IP}" != "${GATEWAY_IP}" ]]; then
+  echo "WARNING: DuckDNS A-record != this server IP."
+  echo "         Update ${GATEWAY_DOMAIN} → ${SERVER_IP} (now points to ${GATEWAY_IP})."
+  echo "         HTTPS from outside will hit the wrong host (connection refused / timeout)."
+fi
+
+echo "HTTP check (ACME HTTP-01 needs :80 reachable from Internet):"
+curl -I --max-time 15 "http://${GATEWAY_DOMAIN}/" || true
+
+echo "HTTPS check (cert may take ~30–90s on first issue):"
+https_ok=0
+for i in 1 2 3 4 5 6; do
+  if curl -I --max-time 20 "https://${GATEWAY_DOMAIN}/" >/tmp/caddy-https-check.out 2>/tmp/caddy-https-check.err; then
+    https_ok=1
+    cat /tmp/caddy-https-check.out || true
+    break
+  fi
+  echo "  attempt ${i}/6 failed: $(tr '\n' ' ' </tmp/caddy-https-check.err)"
+  sleep 10
+done
+if [[ "${https_ok}" != "1" ]]; then
+  echo "WARNING: HTTPS still failing (often ACME / blocked :80)."
+  echo "Recent caddy logs:"
+  run journalctl -u caddy -n 60 --no-pager || true
+  echo "If HTTP-01 cannot pass, use DNS-01:"
+  echo "  ./deploy/duckdns-dns01-caddy-setup.sh --email you@example.com --duckdns-token YOUR_TOKEN"
+fi
 
 echo
 echo "Done."
@@ -395,17 +448,21 @@ echo "Gateway domain: https://${GATEWAY_DOMAIN}"
 if [[ -n "${SERVICE_DOMAIN_KANBAN}" ]]; then
   echo "Kanban domain: https://${SERVICE_DOMAIN_KANBAN}"
 fi
-if [[ -n "${EFFECTIVE_SERVICE_DOMAIN_FKANDU_DASHBOARD}" ]]; then
-  echo "FKandu dashboard domain: https://${EFFECTIVE_SERVICE_DOMAIN_FKANDU_DASHBOARD}"
+if [[ -n "${EFFECTIVE_SERVICE_DOMAIN_BB_CLAN}" ]]; then
+  echo "BB Clan domain: https://${EFFECTIVE_SERVICE_DOMAIN_BB_CLAN}"
 fi
-if [[ -n "${SERVICE_DOMAIN_FKANDU_API}" ]]; then
-  echo "FKandu API domain: https://${SERVICE_DOMAIN_FKANDU_API}"
-fi
-if [[ -n "${SERVICE_DOMAIN_FKANDU_FILES}" ]]; then
-  echo "FKandu files domain: https://${SERVICE_DOMAIN_FKANDU_FILES}"
-fi
-if [[ -n "${EFFECTIVE_SERVICE_DOMAIN_PUBG}" ]]; then
-  echo "PUBG domain: https://${EFFECTIVE_SERVICE_DOMAIN_PUBG}"
+if [[ "${ENABLE_FKANDU}" = "1" ]]; then
+  if [[ -n "${EFFECTIVE_SERVICE_DOMAIN_FKANDU_DASHBOARD}" ]]; then
+    echo "FKandu dashboard domain: https://${EFFECTIVE_SERVICE_DOMAIN_FKANDU_DASHBOARD}"
+  fi
+  if [[ -n "${SERVICE_DOMAIN_FKANDU_API}" ]]; then
+    echo "FKandu API domain: https://${SERVICE_DOMAIN_FKANDU_API}"
+  fi
+  if [[ -n "${SERVICE_DOMAIN_FKANDU_FILES}" ]]; then
+    echo "FKandu files domain: https://${SERVICE_DOMAIN_FKANDU_FILES}"
+  fi
+else
+  echo "FKandu: отключён (ENABLE_FKANDU=0)"
 fi
 echo "Configured routes:"
 run ls -1 "${ROUTES_DIR}" || true
@@ -416,4 +473,4 @@ echo "  caddy-route add --name my-service --path /my-service --upstream 127.0.0.
 echo "Or auto-detect port from systemd unit:"
 echo "  caddy-route add-from-unit --unit my-service --name my-service --path /my-service"
 echo "Or bulk-sync from unit files:"
-echo "  caddy-route sync --from /etc/systemd/system --prefix /svc --include 'kanban|fkandu|pubg'"
+echo "  caddy-route sync --from /etc/systemd/system --prefix /svc --include 'kanban|bb-clan'"

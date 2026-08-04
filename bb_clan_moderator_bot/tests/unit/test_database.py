@@ -156,6 +156,27 @@ async def test_update_member_profile_preserves_created_at(db: Database):
     assert after.created_at == before.created_at
 
 
+async def test_delete_member_removes_member_and_group_row(db: Database):
+    await seed_member(db, 70, track_in_group=True)
+    assert await db.is_member(70)
+    assert 70 in await db.get_group_member_ids()
+
+    assert await db.delete_member(70) is True
+    assert await db.is_member(70) is False
+    assert 70 not in await db.get_group_member_ids()
+    progress = await db.get_progress(70)
+    assert progress is not None
+    assert progress.step == "completed"
+    assert progress.game_nick == "PlayerOne"
+    assert await db.delete_member(70) is False
+
+
+async def test_delete_member_can_skip_survey_restore(db: Database):
+    await seed_member(db, 71, track_in_group=True)
+    assert await db.delete_member(71, restore_completed_survey=False) is True
+    assert await db.get_progress(71) is None
+
+
 async def test_save_member_preserves_created_at_on_conflict(db: Database):
     await seed_member(db, 13, game_nick="Nick", real_name="Ivan", track_in_group=False)
     before = await db.get_member(13)

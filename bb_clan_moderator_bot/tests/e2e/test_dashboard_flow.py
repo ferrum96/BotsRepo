@@ -5,7 +5,7 @@ import sqlite3
 from tests.conftest import seed_blacklist_sync, seed_member_sync
 
 
-def test_e2e_member_kick_to_blacklist_to_unblock(api_client, auth_headers, db_path):
+def test_e2e_member_kick_deletes_without_blacklist(api_client, auth_headers, db_path):
     seed_member_sync(
         db_path,
         1001,
@@ -30,22 +30,11 @@ def test_e2e_member_kick_to_blacklist_to_unblock(api_client, auth_headers, db_pa
     members_after_kick = api_client.get("/api/members").json()
     assert all(m["user_id"] != 1001 for m in members_after_kick)
 
-    blacklist = api_client.get("/api/blacklist").json()
-    assert len(blacklist) == 1
-    assert blacklist[0]["user_id"] == 1001
-    assert blacklist[0]["reason"] == "kicked_from_dashboard"
-    assert blacklist[0]["game_nick"] == "ClanFox"
+    assert api_client.get("/api/blacklist").json() == []
 
     stats_mid = api_client.get("/api/stats").json()
-    assert stats_mid["total_blacklist"] == 1
-
-    unblock = api_client.post("/api/blacklist/1001/unblock", headers=auth_headers)
-    assert unblock.status_code == 200
-    assert unblock.json() == {"ok": True}
-
-    assert api_client.get("/api/blacklist").json() == []
-    stats_after = api_client.get("/api/stats").json()
-    assert stats_after["total_blacklist"] == 0
+    assert stats_mid["total_members"] == 0
+    assert stats_mid["total_blacklist"] == 0
 
 
 def test_e2e_survey_failure_unblock_requires_survey(api_client, auth_headers, db_path):
@@ -53,7 +42,8 @@ def test_e2e_survey_failure_unblock_requires_survey(api_client, auth_headers, db
 
     unblock = api_client.post("/api/blacklist/777/unblock", headers=auth_headers)
     assert unblock.status_code == 200
-    assert unblock.json() == {"ok": True, "requires_survey": True}
+    assert unblock.json().get("ok") is True
+    assert unblock.json().get("requires_survey") is True
 
     # User is cleared from blacklist but not auto-restored to members/group.
     assert api_client.get("/api/blacklist").json() == []
@@ -89,10 +79,13 @@ def test_e2e_kick_persists_in_sqlite(api_client, auth_headers, db_path):
         bl = conn.execute(
             "SELECT reason FROM blacklist WHERE user_id = 1001"
         ).fetchone()
+        member = conn.execute(
+            "SELECT 1 FROM members WHERE user_id = 1001"
+        ).fetchone()
         gm = conn.execute(
             "SELECT 1 FROM group_members WHERE user_id = 1001"
         ).fetchone()
 
-    assert bl is not None
-    assert bl[0] == "kicked_from_dashboard"
+    assert bl is None
+    assert member is None
     assert gm is None

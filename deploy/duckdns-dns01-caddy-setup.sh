@@ -200,19 +200,21 @@ EOF
 
 # Default ports (fallbacks)
 PORT_KANBAN=3002
+PORT_BB_CLAN_API=8080
+PORT_PUBG_API=8080
 PORT_FKANDU_DASHBOARD=3000
 PORT_FKANDU_API=8000
 PORT_FKANDU_BOT_FILES=8088
-PORT_PUBG_API=8080
 PORT_DEPLOY_WEBHOOK=9000
 DEPLOY_WEBHOOK_PATH="/hooks/deploy"
 PORT_DEPLOY_WEBHOOK_PUBLIC=450
+ENABLE_FKANDU="${ENABLE_FKANDU:-0}"
 
 # Optional domains from deploy/domains.env
 GATEWAY_DOMAIN=""
 SERVICE_DOMAIN_KANBAN=""
-SERVICE_DOMAIN_FKANDU=""
 SERVICE_DOMAIN_BB_CLAN=""
+SERVICE_DOMAIN_FKANDU=""
 SERVICE_DOMAIN_FKANDU_DASHBOARD=""
 SERVICE_DOMAIN_FKANDU_API=""
 SERVICE_DOMAIN_FKANDU_FILES=""
@@ -233,15 +235,17 @@ if [[ -z "${GATEWAY_DOMAIN}" ]]; then
   exit 1
 fi
 
+EFFECTIVE_SERVICE_DOMAIN_BB_CLAN="${SERVICE_DOMAIN_BB_CLAN}"
+if [[ -z "${EFFECTIVE_SERVICE_DOMAIN_BB_CLAN}" ]]; then
+  EFFECTIVE_SERVICE_DOMAIN_BB_CLAN="${SERVICE_DOMAIN_PUBG}"
+fi
+
 EFFECTIVE_SERVICE_DOMAIN_FKANDU_DASHBOARD="${SERVICE_DOMAIN_FKANDU_DASHBOARD}"
 if [[ -z "${EFFECTIVE_SERVICE_DOMAIN_FKANDU_DASHBOARD}" ]]; then
   EFFECTIVE_SERVICE_DOMAIN_FKANDU_DASHBOARD="${SERVICE_DOMAIN_FKANDU}"
 fi
 
-EFFECTIVE_SERVICE_DOMAIN_PUBG="${SERVICE_DOMAIN_PUBG}"
-if [[ -z "${EFFECTIVE_SERVICE_DOMAIN_PUBG}" ]]; then
-  EFFECTIVE_SERVICE_DOMAIN_PUBG="${SERVICE_DOMAIN_BB_CLAN}"
-fi
+EFFECTIVE_BB_CLAN_PORT="${PORT_BB_CLAN_API:-${PORT_PUBG_API:-8080}}"
 
 ROUTES_DIR="/etc/caddy/routes"
 CADDYFILE_PATH="/etc/caddy/Caddyfile"
@@ -285,10 +289,12 @@ export DuckDNS_Token="${DUCKDNS_TOKEN}"
 ALL_DOMAINS=()
 add_unique_domain "${GATEWAY_DOMAIN}"
 add_unique_domain "${SERVICE_DOMAIN_KANBAN}"
-add_unique_domain "${EFFECTIVE_SERVICE_DOMAIN_FKANDU_DASHBOARD}"
-add_unique_domain "${SERVICE_DOMAIN_FKANDU_API}"
-add_unique_domain "${SERVICE_DOMAIN_FKANDU_FILES}"
-add_unique_domain "${EFFECTIVE_SERVICE_DOMAIN_PUBG}"
+add_unique_domain "${EFFECTIVE_SERVICE_DOMAIN_BB_CLAN}"
+if [[ "${ENABLE_FKANDU}" = "1" ]]; then
+  add_unique_domain "${EFFECTIVE_SERVICE_DOMAIN_FKANDU_DASHBOARD}"
+  add_unique_domain "${SERVICE_DOMAIN_FKANDU_API}"
+  add_unique_domain "${SERVICE_DOMAIN_FKANDU_FILES}"
+fi
 
 echo "==> Issuing certificates via DNS-01 (DuckDNS)"
 for domain in "${ALL_DOMAINS[@]}"; do
@@ -346,29 +352,39 @@ fi
 # Always expose deploy webhook on HTTPS gateway (GitHub cannot use closed :449 after ufw).
 write_route "deploy-webhook" "${DEPLOY_WEBHOOK_PATH}" "127.0.0.1:${PORT_DEPLOY_WEBHOOK}"
 
+KANBAN_ON_GATEWAY=0
+if should_add_gateway_path "${SERVICE_DOMAIN_KANBAN}"; then
+  KANBAN_ON_GATEWAY=1
+fi
+
 if [[ "${SKIP_DEFAULT_ROUTES}" = "0" ]]; then
-  if should_add_gateway_path "${SERVICE_DOMAIN_KANBAN}"; then
-    write_route "kanban" "/kanban" "127.0.0.1:${PORT_KANBAN}"
+  if should_add_gateway_path "${EFFECTIVE_SERVICE_DOMAIN_BB_CLAN}"; then
+    write_route "bb-clan" "/bb-clan" "127.0.0.1:${EFFECTIVE_BB_CLAN_PORT}"
   fi
-  if should_add_gateway_path "${EFFECTIVE_SERVICE_DOMAIN_FKANDU_DASHBOARD}"; then
-    write_next_dashboard_route "fkandu-dashboard" "/dashboard" "127.0.0.1:${PORT_FKANDU_DASHBOARD}"
-  fi
-  if should_add_gateway_path "${SERVICE_DOMAIN_FKANDU_API}"; then
-    write_preserve_route "fkandu-api" "/api" "127.0.0.1:${PORT_FKANDU_API}"
-  fi
-  if should_add_gateway_path "${SERVICE_DOMAIN_FKANDU_FILES}"; then
-    write_preserve_route "fkandu-files" "/files" "127.0.0.1:${PORT_FKANDU_BOT_FILES}"
-  fi
-  if should_add_gateway_path "${EFFECTIVE_SERVICE_DOMAIN_PUBG}"; then
-    write_route "pubg" "/pubg" "127.0.0.1:${PORT_PUBG_API}"
+  if [[ "${ENABLE_FKANDU}" = "1" ]]; then
+    if should_add_gateway_path "${EFFECTIVE_SERVICE_DOMAIN_FKANDU_DASHBOARD}"; then
+      write_next_dashboard_route "fkandu-dashboard" "/dashboard" "127.0.0.1:${PORT_FKANDU_DASHBOARD}"
+    fi
+    if should_add_gateway_path "${SERVICE_DOMAIN_FKANDU_API}"; then
+      write_preserve_route "fkandu-api" "/api" "127.0.0.1:${PORT_FKANDU_API}"
+    fi
+    if should_add_gateway_path "${SERVICE_DOMAIN_FKANDU_FILES}"; then
+      write_preserve_route "fkandu-files" "/files" "127.0.0.1:${PORT_FKANDU_BOT_FILES}"
+    fi
   fi
 fi
 
 UPSTREAM_KANBAN="127.0.0.1:${PORT_KANBAN}"
+UPSTREAM_BB_CLAN="127.0.0.1:${EFFECTIVE_BB_CLAN_PORT}"
 UPSTREAM_FKANDU_DASHBOARD="127.0.0.1:${PORT_FKANDU_DASHBOARD}"
 UPSTREAM_FKANDU_API="127.0.0.1:${PORT_FKANDU_API}"
 UPSTREAM_FKANDU_FILES="127.0.0.1:${PORT_FKANDU_BOT_FILES}"
-UPSTREAM_PUBG="127.0.0.1:${PORT_PUBG_API}"
+
+if [[ "${KANBAN_ON_GATEWAY}" = "1" ]]; then
+  GATEWAY_FALLBACK="reverse_proxy ${UPSTREAM_KANBAN}"
+else
+  GATEWAY_FALLBACK='respond "Route is not configured. Use /<service> path." 404'
+fi
 
 TMP_CADDYFILE="$(mktemp)"
 cat > "${TMP_CADDYFILE}" <<EOF
@@ -389,16 +405,18 @@ ${GATEWAY_DOMAIN} {
     import ${ROUTES_DIR}/*.caddy
 
     handle {
-        respond "Route is not configured. Use /<service> path." 404
+        ${GATEWAY_FALLBACK}
     }
 }
 EOF
 
 append_domain_proxy_block "${TMP_CADDYFILE}" "${SERVICE_DOMAIN_KANBAN}" "${UPSTREAM_KANBAN}" "$(cert_fullchain_for "${SERVICE_DOMAIN_KANBAN}")" "$(cert_key_for "${SERVICE_DOMAIN_KANBAN}")"
-append_domain_proxy_block "${TMP_CADDYFILE}" "${EFFECTIVE_SERVICE_DOMAIN_FKANDU_DASHBOARD}" "${UPSTREAM_FKANDU_DASHBOARD}" "$(cert_fullchain_for "${EFFECTIVE_SERVICE_DOMAIN_FKANDU_DASHBOARD}")" "$(cert_key_for "${EFFECTIVE_SERVICE_DOMAIN_FKANDU_DASHBOARD}")"
-append_domain_proxy_block "${TMP_CADDYFILE}" "${SERVICE_DOMAIN_FKANDU_API}" "${UPSTREAM_FKANDU_API}" "$(cert_fullchain_for "${SERVICE_DOMAIN_FKANDU_API}")" "$(cert_key_for "${SERVICE_DOMAIN_FKANDU_API}")"
-append_domain_proxy_block "${TMP_CADDYFILE}" "${SERVICE_DOMAIN_FKANDU_FILES}" "${UPSTREAM_FKANDU_FILES}" "$(cert_fullchain_for "${SERVICE_DOMAIN_FKANDU_FILES}")" "$(cert_key_for "${SERVICE_DOMAIN_FKANDU_FILES}")"
-append_domain_proxy_block "${TMP_CADDYFILE}" "${EFFECTIVE_SERVICE_DOMAIN_PUBG}" "${UPSTREAM_PUBG}" "$(cert_fullchain_for "${EFFECTIVE_SERVICE_DOMAIN_PUBG}")" "$(cert_key_for "${EFFECTIVE_SERVICE_DOMAIN_PUBG}")"
+append_domain_proxy_block "${TMP_CADDYFILE}" "${EFFECTIVE_SERVICE_DOMAIN_BB_CLAN}" "${UPSTREAM_BB_CLAN}" "$(cert_fullchain_for "${EFFECTIVE_SERVICE_DOMAIN_BB_CLAN}")" "$(cert_key_for "${EFFECTIVE_SERVICE_DOMAIN_BB_CLAN}")"
+if [[ "${ENABLE_FKANDU}" = "1" ]]; then
+  append_domain_proxy_block "${TMP_CADDYFILE}" "${EFFECTIVE_SERVICE_DOMAIN_FKANDU_DASHBOARD}" "${UPSTREAM_FKANDU_DASHBOARD}" "$(cert_fullchain_for "${EFFECTIVE_SERVICE_DOMAIN_FKANDU_DASHBOARD}")" "$(cert_key_for "${EFFECTIVE_SERVICE_DOMAIN_FKANDU_DASHBOARD}")"
+  append_domain_proxy_block "${TMP_CADDYFILE}" "${SERVICE_DOMAIN_FKANDU_API}" "${UPSTREAM_FKANDU_API}" "$(cert_fullchain_for "${SERVICE_DOMAIN_FKANDU_API}")" "$(cert_key_for "${SERVICE_DOMAIN_FKANDU_API}")"
+  append_domain_proxy_block "${TMP_CADDYFILE}" "${SERVICE_DOMAIN_FKANDU_FILES}" "${UPSTREAM_FKANDU_FILES}" "$(cert_fullchain_for "${SERVICE_DOMAIN_FKANDU_FILES}")" "$(cert_key_for "${SERVICE_DOMAIN_FKANDU_FILES}")"
+fi
 
 run cp "${TMP_CADDYFILE}" "${CADDYFILE_PATH}"
 rm -f "${TMP_CADDYFILE}"
@@ -435,15 +453,19 @@ echo "GitHub deploy webhook URL: https://${GATEWAY_DOMAIN}${DEPLOY_WEBHOOK_PATH}
 if [[ -n "${SERVICE_DOMAIN_KANBAN}" ]]; then
   echo "Kanban domain: https://${SERVICE_DOMAIN_KANBAN}"
 fi
-if [[ -n "${EFFECTIVE_SERVICE_DOMAIN_FKANDU_DASHBOARD}" ]]; then
-  echo "FKandu dashboard domain: https://${EFFECTIVE_SERVICE_DOMAIN_FKANDU_DASHBOARD}"
+if [[ -n "${EFFECTIVE_SERVICE_DOMAIN_BB_CLAN}" ]]; then
+  echo "BB Clan domain: https://${EFFECTIVE_SERVICE_DOMAIN_BB_CLAN}"
 fi
-if [[ -n "${SERVICE_DOMAIN_FKANDU_API}" ]]; then
-  echo "FKandu API domain: https://${SERVICE_DOMAIN_FKANDU_API}"
-fi
-if [[ -n "${SERVICE_DOMAIN_FKANDU_FILES}" ]]; then
-  echo "FKandu files domain: https://${SERVICE_DOMAIN_FKANDU_FILES}"
-fi
-if [[ -n "${EFFECTIVE_SERVICE_DOMAIN_PUBG}" ]]; then
-  echo "PUBG domain: https://${EFFECTIVE_SERVICE_DOMAIN_PUBG}"
+if [[ "${ENABLE_FKANDU}" = "1" ]]; then
+  if [[ -n "${EFFECTIVE_SERVICE_DOMAIN_FKANDU_DASHBOARD}" ]]; then
+    echo "FKandu dashboard domain: https://${EFFECTIVE_SERVICE_DOMAIN_FKANDU_DASHBOARD}"
+  fi
+  if [[ -n "${SERVICE_DOMAIN_FKANDU_API}" ]]; then
+    echo "FKandu API domain: https://${SERVICE_DOMAIN_FKANDU_API}"
+  fi
+  if [[ -n "${SERVICE_DOMAIN_FKANDU_FILES}" ]]; then
+    echo "FKandu files domain: https://${SERVICE_DOMAIN_FKANDU_FILES}"
+  fi
+else
+  echo "FKandu: отключён (ENABLE_FKANDU=0)"
 fi

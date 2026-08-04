@@ -85,7 +85,9 @@ export function MembersTable({
       header: 'Режим',
       headerClassName: 'hidden sm:table-cell',
       cellClassName: 'hidden sm:table-cell',
-      cell: (row) => <span className="text-on-surface-variant">{row.perspective}</span>,
+      cell: (row) => (
+        <span className="text-on-surface-variant">{row.perspective || '—'}</span>
+      ),
     },
     {
       key: 'join_date',

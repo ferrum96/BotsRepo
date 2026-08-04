@@ -19,9 +19,9 @@ Options:
 
 Examples:
   caddy-route add --name analytics --path /analytics --upstream 127.0.0.1:9100
-  caddy-route add --name fkandu-api --path /api --upstream 127.0.0.1:8000 --preserve-path
   caddy-route add-from-unit --unit kanban --name kanban --path /kanban
-  caddy-route sync --from /etc/systemd/system --prefix /svc
+  caddy-route add-from-unit --unit bb-clan-api --name bb-clan --path /bb-clan
+  caddy-route sync --from /etc/systemd/system --prefix /svc --include 'kanban|bb-clan'
   caddy-route remove --name analytics
   caddy-route list
 USAGE

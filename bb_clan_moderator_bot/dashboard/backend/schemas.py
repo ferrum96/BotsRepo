@@ -12,7 +12,7 @@ class MemberOut(BaseModel):
     game_nick: str
     real_name: str
     discord_nick: Optional[str]
-    perspective: str
+    perspective: str = ""
     join_date: str
     is_removed: bool
 
@@ -24,7 +24,8 @@ class MemberUpdate(BaseModel):
     game_nick: str = Field(..., min_length=1, max_length=64)
     real_name: str = Field(..., min_length=1, max_length=64)
     discord_nick: Optional[str] = Field(None, max_length=64)
-    perspective: Literal["FPP", "TPP", "Mixed"]
+    # Empty string = unknown (imported without survey).
+    perspective: Literal["FPP", "TPP", "Mixed", ""] = ""
 
     @field_validator("game_nick", "real_name")
     @classmethod
@@ -41,6 +42,11 @@ class MemberUpdate(BaseModel):
             return None
         cleaned = value.strip()
         return cleaned or None
+
+    @field_validator("perspective")
+    @classmethod
+    def normalize_perspective(cls, value: str) -> str:
+        return (value or "").strip()
 
 
 class BlacklistOut(BaseModel):

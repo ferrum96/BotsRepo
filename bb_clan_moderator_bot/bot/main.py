@@ -33,6 +33,7 @@ from bot.handlers.admin import (
     cmd_members,
     cmd_search,
     cmd_sync_group,
+    cmd_sync_members_full,
     cmd_stats,
     cmd_unblacklist,
     enforce_blacklist_telegram_bans,
@@ -42,6 +43,7 @@ from bot.handlers.admin import (
     sync_group_members_state,
 )
 from bot.handlers.survey import build_survey_handler, cmd_contacts
+from bot.member_import import maybe_full_member_import
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -55,6 +57,31 @@ async def post_init(application: Application) -> None:
     await db.init()
     logger.info("Database initialized")
     config: Config = application.bot_data["config"]
+
+    # Bot API cannot list regular members. Telethon full import when DB empty
+    # or FULL_MEMBER_SYNC=1 (needs TELEGRAM_API_ID/HASH).
+    full_import = await maybe_full_member_import(db, config)
+    if full_import is not None:
+        logger.info(
+            "Full member import: skipped=%s reason=%s seen=%s imported=%s "
+            "tracked=%s skipped_admins=%s errors=%s",
+            full_import.get("skipped"),
+            full_import.get("reason") or "-",
+            full_import.get("seen"),
+            full_import.get("imported"),
+            full_import.get("tracked"),
+            full_import.get("skipped_admins"),
+            full_import.get("errors"),
+        )
+        if full_import.get("imported") or full_import.get("tracked"):
+            await publish_dashboard_event(
+                config,
+                {
+                    "type": "members.changed",
+                    "reason": "full_member_import",
+                    "imported": full_import.get("imported", 0),
+                },
+            )
 
     # Initial one-shot sync to reflect real current group state in dashboard.
     result = await sync_group_members_state(application.bot, db, config)
@@ -181,6 +208,7 @@ def main() -> None:
     application.add_handler(CommandHandler("unblacklist", cmd_unblacklist))
     application.add_handler(CommandHandler("kick_non_members", cmd_kick_non_members))
     application.add_handler(CommandHandler("sync_group", cmd_sync_group))
+    application.add_handler(CommandHandler("sync_members_full", cmd_sync_members_full))
     application.add_handler(CommandHandler("assign_titles", cmd_assign_titles))
     application.add_handler(CommandHandler("admin_help", cmd_help_admin))
 

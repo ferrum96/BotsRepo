@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import html
 import logging
+import time
 from typing import TYPE_CHECKING
 
 from telegram import Bot, ChatPermissions, Update
@@ -31,9 +32,30 @@ _REMOVED_STATUSES = {
     ChatMemberStatus.LEFT,
     ChatMemberStatus.BANNED,
 }
+_ACTIVE_MEMBER_STATUSES = {
+    ChatMemberStatus.MEMBER,
+    ChatMemberStatus.RESTRICTED,
+}
 # Soft kick = ban+unban. Ignore the transient BANNED update so we don't
 # accidentally blacklist people who only failed the survey gate.
 _soft_kick_user_ids: set[int] = set()
+# After leave/kick, skip survey backfill briefly (Telegram status can lag).
+_recently_left_user_ids: dict[int, float] = {}
+_RECENT_LEAVE_GRACE_SEC = 120.0
+
+
+def _mark_recently_left(user_id: int) -> None:
+    _recently_left_user_ids[user_id] = time.monotonic()
+
+
+def _is_recently_left(user_id: int) -> bool:
+    left_at = _recently_left_user_ids.get(user_id)
+    if left_at is None:
+        return False
+    if time.monotonic() - left_at > _RECENT_LEAVE_GRACE_SEC:
+        _recently_left_user_ids.pop(user_id, None)
+        return False
+    return True
 
 
 def _member_tag_from_chat_member(chat_member) -> str:
@@ -96,6 +118,8 @@ async def sync_group_members_state(
     bot: Bot,
     db: Database,
     config: "Config",
+    *,
+    backfill_completed_surveys: bool = True,
 ) -> dict[str, int]:
     """Sync Telegram group state and backfill members from completed surveys."""
     imported = 0
@@ -103,84 +127,54 @@ async def sync_group_members_state(
     imported_admins = 0
     imported_admin_errors = 0
     known_member_ids = await db.get_member_user_ids()
+    # Admins/owner are not clan members — do not import them via Bot API.
+    # Full regular-member backfill is Telethon (`/sync_members_full`).
 
-    # Telegram Bot API cannot enumerate all regular members, but administrators
-    # are available and can be imported on restart.
-    try:
-        administrators = await bot.get_chat_administrators(config.group_id)
-        for admin in administrators:
-            if admin.user.is_bot or admin.status == ChatMemberStatus.OWNER:
+    if backfill_completed_surveys:
+        completed_progress = await db.get_progress_by_step("completed")
+        for progress in completed_progress:
+            if progress.user_id in known_member_ids:
+                continue
+            if _is_recently_left(progress.user_id):
+                continue
+            if not progress.game_nick or not progress.real_name:
+                continue
+            try:
+                chat_member = await bot.get_chat_member(
+                    config.group_id, progress.user_id
+                )
+            except (BadRequest, Forbidden, TelegramError):
+                logger.exception(
+                    "Failed to fetch chat member %s for completed survey import",
+                    progress.user_id,
+                )
+                imported_errors += 1
                 continue
 
-            if admin.user.id in known_member_ids:
-                await db.track_group_member(admin.user.id)
+            # Only regular members — never owner/admin, never left/banned.
+            if chat_member.status not in _ACTIVE_MEMBER_STATUSES:
                 continue
 
-            guessed_nick = (
-                _member_tag_from_chat_member(admin)
-                or admin.user.username
-                or admin.user.first_name
-                or f"user_{admin.user.id}"
-            )
-            guessed_nick = normalize_game_nick(guessed_nick)
+            user = chat_member.user
             await db.save_member(
-                user_id=admin.user.id,
-                tg_username=admin.user.username,
-                tg_first_name=admin.user.first_name,
-                game_nick=guessed_nick,
-                real_name=admin.user.full_name or guessed_nick,
-                discord_nick=None,
-                perspective="Mixed",
+                user_id=user.id,
+                tg_username=user.username,
+                tg_first_name=user.first_name,
+                game_nick=progress.game_nick,
+                real_name=progress.real_name,
+                discord_nick=progress.discord_nick,
+                perspective=progress.perspective or "Mixed",
             )
-            await db.track_group_member(admin.user.id)
-            known_member_ids.add(admin.user.id)
-            imported_admins += 1
-    except (BadRequest, Forbidden, TelegramError):
-        logger.exception(
-            "Failed to import current administrators for chat %s",
-            config.group_id,
-        )
-        imported_admin_errors += 1
-
-    completed_progress = await db.get_progress_by_step("completed")
-    for progress in completed_progress:
-        if progress.user_id in known_member_ids:
-            continue
-        if not progress.game_nick or not progress.real_name:
-            continue
-        try:
-            chat_member = await bot.get_chat_member(config.group_id, progress.user_id)
-        except (BadRequest, Forbidden, TelegramError):
-            logger.exception(
-                "Failed to fetch chat member %s for completed survey import",
-                progress.user_id,
-            )
-            imported_errors += 1
-            continue
-
-        if chat_member.status in _REMOVED_STATUSES:
-            continue
-
-        user = chat_member.user
-        await db.save_member(
-            user_id=user.id,
-            tg_username=user.username,
-            tg_first_name=user.first_name,
-            game_nick=progress.game_nick,
-            real_name=progress.real_name,
-            discord_nick=progress.discord_nick,
-            perspective=progress.perspective or "Mixed",
-        )
-        await db.track_group_member(user.id)
-        await db.clear_progress(user.id)
-        known_member_ids.add(user.id)
-        imported += 1
-        member = await db.get_member(user.id)
-        if member and member.game_nick and not config.is_admin(user.id):
-            await assign_game_nick_tag(
-                bot, config.group_id, user.id, member.game_nick
-            )
-            await check_activity_on_join(bot, db, config, member)
+            await db.track_group_member(user.id)
+            await db.clear_progress(user.id)
+            known_member_ids.add(user.id)
+            imported += 1
+            member = await db.get_member(user.id)
+            if member and member.game_nick and not config.is_admin(user.id):
+                await assign_game_nick_tag(
+                    bot, config.group_id, user.id, member.game_nick
+                )
+                await check_activity_on_join(bot, db, config, member)
 
     members = await db.get_all_members()
     admin_ids = set(config.admin_ids)
@@ -198,17 +192,14 @@ async def sync_group_members_state(
             continue
 
         if chat_member.status in _REMOVED_STATUSES:
-            await db.untrack_group_member(member.user_id)
+            # Soft-kick transient ban: only untrack.
+            if member.user_id in _soft_kick_user_ids:
+                await db.untrack_group_member(member.user_id)
+                missing += 1
+                continue
+            # Leave / admin kick-ban: drop clan row (no blacklist — can return via survey).
+            await db.delete_member(member.user_id)
             missing += 1
-            # Voluntary leave should not trigger blacklist entry.
-            if (
-                chat_member.status == ChatMemberStatus.BANNED
-                and member.user_id not in admin_ids
-                and member.user_id not in _soft_kick_user_ids
-                and not await db.is_blacklisted(member.user_id)
-            ):
-                await db.add_to_blacklist(member.user_id, "removed_from_group")
-                blacklisted += 1
             continue
 
         await db.track_group_member(member.user_id)
@@ -752,6 +743,8 @@ async def cmd_help_admin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         "/unblacklist &lt;user_id&gt; — снять блокировку\n"
         "/kick_non_members — удалить не-участников из группы\n"
         "/sync_group — синхронизировать фактический состав группы\n"
+        "/sync_members_full — импорт всех участников группы из Telegram "
+        "(нужны TELEGRAM_API_ID/HASH)\n"
         "/assign_titles — проставить игровые ники как member tag всем участникам\n"
         "/admin_help — эта справка"
     )
@@ -866,6 +859,55 @@ async def cmd_sync_group(
     )
 
 
+async def cmd_sync_members_full(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    """Import all current Telegram group participants into the DB."""
+    if not _is_admin(update, context):
+        await _reply_admin_only(update)
+        return
+    if not update.message:
+        return
+
+    from bot.member_import import import_all_chat_participants
+
+    config = _get_config(context)
+    db = _get_db(context)
+    await update.message.reply_text(
+        "Импортирую всех участников группы из Telegram "
+        "(Telethon; нужны TELEGRAM_API_ID/HASH)…"
+    )
+    result = await import_all_chat_participants(db, config)
+    if result.get("skipped"):
+        await update.message.reply_text(
+            "Импорт пропущен.\n"
+            f"Причина: {result.get('reason') or 'unknown'}\n"
+            "Добавь TELEGRAM_API_ID и TELEGRAM_API_HASH в .env "
+            "(https://my.telegram.org) и перезапусти бота."
+        )
+        return
+
+    await publish_dashboard_event(
+        config,
+        {
+            "type": "members.changed",
+            "reason": "full_member_import",
+            "imported": result.get("imported", 0),
+        },
+    )
+    # Reconcile presence after bulk import.
+    sync_result = await sync_group_members_state(context.bot, db, config)
+    await update.message.reply_text(
+        "Полный импорт завершён.\n"
+        f"Увидено в группе: {result.get('seen', 0)}\n"
+        f"Новых в БД: {result.get('imported', 0)}\n"
+        f"Уже были (tracked): {result.get('tracked', 0)}\n"
+        f"Пропущено админов/owner: {result.get('skipped_admins', 0)}\n"
+        f"Ошибок импорта: {result.get('errors', 0)}\n"
+        f"После сверки в группе: {sync_result['present']}"
+    )
+
+
 async def on_chat_member_update(
     update: Update, context: ContextTypes.DEFAULT_TYPE
 ) -> None:
@@ -909,6 +951,7 @@ async def on_chat_member_update(
             await _reject_unauthorized_join(context.bot, config, db, user.id)
             return
 
+        _recently_left_user_ids.pop(user.id, None)
         await _handle_vetted_group_join(context.bot, config, db, user)
         sync_result = await sync_group_members_state(context.bot, db, config)
         logger.info(
@@ -923,29 +966,49 @@ async def on_chat_member_update(
         return
 
     if was_member and new_status in removed_statuses:
-        await db.untrack_group_member(user.id)
-        if config.is_admin(user.id):
-            _soft_kick_user_ids.discard(user.id)
-            return
-
         # Soft kick uses ban+unban; ignore that transient BANNED event.
         soft_kicked = user.id in _soft_kick_user_ids
         if soft_kicked:
+            await db.untrack_group_member(user.id)
             logger.info(
-                "User %s removed by soft kick gate; blacklist skipped",
+                "User %s removed by soft kick gate; clan row kept/skipped",
                 user.id,
             )
-        elif new_status == ChatMemberStatus.BANNED:
-            # Keep original blacklist reason if already listed (e.g. survey_failed).
-            if not await db.is_blacklisted(user.id):
-                await db.add_to_blacklist(user.id, "removed_from_group")
-                logger.info("User %s blacklisted after group ban/kick", user.id)
         else:
-            logger.info("User %s left group voluntarily, blacklist skipped", user.id)
+            # Leave or admin kick/ban — purge clan DB (no blacklist).
+            deleted = await db.delete_member(user.id)
+            _mark_recently_left(user.id)
+            reason = (
+                "admin_kick_ban"
+                if new_status == ChatMemberStatus.BANNED
+                else "voluntary_leave"
+            )
+            logger.info(
+                "User %s left/removed (%s), deleted_from_clan=%s",
+                user.id,
+                reason,
+                deleted,
+            )
+            if deleted:
+                await publish_dashboard_event(
+                    config,
+                    {
+                        "type": "members.changed",
+                        "reason": reason,
+                        "user_id": user.id,
+                    },
+                )
 
         # Keep soft-kick marker through sync so a concurrent BANNED status
         # cannot be misclassified as an admin ban.
-        sync_result = await sync_group_members_state(context.bot, db, config)
+        # Do not backfill surveys here — restore_completed_survey + lagging
+        # getChatMember would immediately re-create the deleted row.
+        sync_result = await sync_group_members_state(
+            context.bot,
+            db,
+            config,
+            backfill_completed_surveys=False,
+        )
         if soft_kicked:
             _soft_kick_user_ids.discard(user.id)
         logger.info(
@@ -1013,12 +1076,28 @@ async def on_group_membership_message_event(
     soft_kicked_left_id: int | None = None
     if update.message.left_chat_member and not update.message.left_chat_member.is_bot:
         left_id = update.message.left_chat_member.id
-        await db.untrack_group_member(left_id)
         # Keep soft-kick marker through sync (same race as chat_member path).
         if left_id in _soft_kick_user_ids:
             soft_kicked_left_id = left_id
+            await db.untrack_group_member(left_id)
+        else:
+            # Service leave/kick — purge clan row (no blacklist).
+            deleted = await db.delete_member(left_id)
+            _mark_recently_left(left_id)
+            if deleted:
+                await publish_dashboard_event(
+                    config,
+                    {
+                        "type": "members.changed",
+                        "reason": "left_or_kicked",
+                        "user_id": left_id,
+                    },
+                )
+            else:
+                await db.untrack_group_member(left_id)
         changed = True
 
+    joined = bool(update.message.new_chat_members)
     if update.message.new_chat_members:
         for user in update.message.new_chat_members:
             if user.is_bot:
@@ -1031,13 +1110,20 @@ async def on_group_membership_message_event(
                 await _reject_unauthorized_join(context.bot, config, db, user.id)
                 changed = True
                 continue
+            _recently_left_user_ids.pop(user.id, None)
             await _handle_vetted_group_join(context.bot, config, db, user)
             changed = True
 
     if not changed:
         return
 
-    sync_result = await sync_group_members_state(context.bot, db, config)
+    sync_result = await sync_group_members_state(
+        context.bot,
+        db,
+        config,
+        # Joins may need survey backfill; pure leave must not re-import leavers.
+        backfill_completed_surveys=joined,
+    )
     if soft_kicked_left_id is not None:
         _soft_kick_user_ids.discard(soft_kicked_left_id)
     logger.info(
@@ -1109,6 +1195,7 @@ async def on_chat_join_request(
         logger.exception("Failed to approve join request for user %s", user.id)
         return
 
+    _recently_left_user_ids.pop(user.id, None)
     await _handle_vetted_group_join(context.bot, config, db, user)
     sync_result = await sync_group_members_state(context.bot, db, config)
     logger.info(

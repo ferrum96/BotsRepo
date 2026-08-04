@@ -397,20 +397,8 @@ async def kick_member(
                     ),
                 )
         elif tg_status in {"left", "kicked", "banned"}:
-            if tg_status == "left":
-                # Soft-left users can still rejoin via invite — hard-ban them.
-                ban_resp = await client.post(
-                    f"https://api.telegram.org/bot{config.bot_token}/banChatMember",
-                    json={"chat_id": config.group_id, "user_id": user_id},
-                    timeout=15,
-                )
-                if ban_resp.status_code != 200 or not ban_resp.json().get("ok"):
-                    detail = ban_resp.json().get("description", ban_resp.text)
-                    raise HTTPException(
-                        status_code=502, detail=f"Telegram API error: {detail}"
-                    )
-            await db.untrack_group_member(user_id)
-            await db.add_to_blacklist(user_id, "kicked_from_dashboard")
+            # Already out of the group — only drop clan DB row.
+            await db.delete_member(user_id)
             await _broadcast(
                 {
                     "type": "dashboard.refresh",
@@ -420,6 +408,7 @@ async def kick_member(
             )
             return {"ok": True}
 
+        # Soft kick (ban+unban): remove from group but allow return after survey.
         ban_resp = await client.post(
             f"https://api.telegram.org/bot{config.bot_token}/banChatMember",
             json={"chat_id": config.group_id, "user_id": user_id},
@@ -431,10 +420,23 @@ async def kick_member(
             raise HTTPException(
                 status_code=502, detail=f"Telegram API error: {detail}"
             )
-        # Keep Telegram ban: soft unban would allow rejoin via invite link.
+        unban_resp = await client.post(
+            f"https://api.telegram.org/bot{config.bot_token}/unbanChatMember",
+            json={
+                "chat_id": config.group_id,
+                "user_id": user_id,
+                "only_if_banned": True,
+            },
+            timeout=15,
+        )
+        if unban_resp.status_code != 200 or not unban_resp.json().get("ok"):
+            detail = unban_resp.json().get("description", unban_resp.text)
+            logger.error("Failed to unban user %s after kick: %s", user_id, detail)
+            raise HTTPException(
+                status_code=502, detail=f"Telegram API error: {detail}"
+            )
 
-    await db.untrack_group_member(user_id)
-    await db.add_to_blacklist(user_id, "kicked_from_dashboard")
+    await db.delete_member(user_id)
     await _broadcast(
         {
             "type": "dashboard.refresh",

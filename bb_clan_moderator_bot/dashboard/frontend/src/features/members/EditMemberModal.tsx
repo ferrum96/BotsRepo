@@ -23,7 +23,7 @@ export function EditMemberModal({
   const [gameNick, setGameNick] = useState('')
   const [realName, setRealName] = useState('')
   const [discordNick, setDiscordNick] = useState('')
-  const [perspective, setPerspective] = useState('FPP')
+  const [perspective, setPerspective] = useState('')
   const [error, setError] = useState('')
 
   useEffect(() => {
@@ -31,7 +31,7 @@ export function EditMemberModal({
     setGameNick(member.game_nick)
     setRealName(member.real_name)
     setDiscordNick(member.discord_nick || '')
-    setPerspective(member.perspective)
+    setPerspective(member.perspective || '')
     setError('')
   }, [member])
 
@@ -102,6 +102,7 @@ export function EditMemberModal({
               onChange={(e) => setPerspective(e.target.value)}
               disabled={isSaving}
             >
+              <option value="">—</option>
               <option value="FPP">FPP</option>
               <option value="TPP">TPP</option>
               <option value="Mixed">Mixed</option>

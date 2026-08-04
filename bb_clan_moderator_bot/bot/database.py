@@ -216,9 +216,13 @@ class Database:
         game_nick: str,
         real_name: str,
         discord_nick: Optional[str],
-        perspective: str,
+        perspective: Optional[str],
+        *,
+        is_legacy: bool = False,
     ) -> None:
         now = datetime.now(timezone.utc).isoformat()
+        # Empty string = unknown (e.g. Telethon import without survey).
+        perspective_value = (perspective or "").strip()
         db = await self.connect()
         await db.execute(
             """
@@ -242,9 +246,9 @@ class Database:
                 game_nick,
                 real_name,
                 discord_nick,
-                perspective,
+                perspective_value,
                 0,
-                0,
+                1 if is_legacy else 0,
                 now,
             ),
         )
@@ -453,17 +457,40 @@ class Database:
         )
         return attempts
 
-    async def track_group_member(self, user_id: int) -> None:
-        now = datetime.now(timezone.utc).isoformat()
+    async def track_group_member(
+        self,
+        user_id: int,
+        joined_at: Optional[str] = None,
+        *,
+        overwrite: bool = False,
+    ) -> None:
+        """Record presence in the Telegram group.
+
+        ``joined_at`` — ISO timestamp; defaults to now. When ``overwrite`` is
+        True and a row already exists, update ``joined_at`` (used for Telethon
+        backfill of the real Telegram join date).
+        """
+        stamp = joined_at or datetime.now(timezone.utc).isoformat()
         db = await self.connect()
-        await db.execute(
-            """
-            INSERT INTO group_members (user_id, joined_at)
-            VALUES (?, ?)
-            ON CONFLICT(user_id) DO NOTHING
-            """,
-            (user_id, now),
-        )
+        if overwrite:
+            await db.execute(
+                """
+                INSERT INTO group_members (user_id, joined_at)
+                VALUES (?, ?)
+                ON CONFLICT(user_id) DO UPDATE SET
+                    joined_at = excluded.joined_at
+                """,
+                (user_id, stamp),
+            )
+        else:
+            await db.execute(
+                """
+                INSERT INTO group_members (user_id, joined_at)
+                VALUES (?, ?)
+                ON CONFLICT(user_id) DO NOTHING
+                """,
+                (user_id, stamp),
+            )
         await db.commit()
 
     async def untrack_group_member(self, user_id: int) -> None:
@@ -472,6 +499,43 @@ class Database:
             "DELETE FROM group_members WHERE user_id = ?", (user_id,)
         )
         await db.commit()
+
+    async def delete_member(
+        self,
+        user_id: int,
+        *,
+        restore_completed_survey: bool = True,
+    ) -> bool:
+        """Remove clan member row and group presence.
+
+        By default restores ``survey_progress`` as ``completed`` from the member
+        profile so the user can rejoin via invite without retaking the survey.
+        """
+        member = (
+            await self.get_member(user_id) if restore_completed_survey else None
+        )
+        db = await self.connect()
+        await db.execute(
+            "DELETE FROM group_members WHERE user_id = ?", (user_id,)
+        )
+        cursor = await db.execute(
+            "DELETE FROM members WHERE user_id = ?", (user_id,)
+        )
+        await db.commit()
+        deleted = cursor.rowcount > 0
+        if deleted and member is not None:
+            await self.set_progress(
+                SurveyProgress(
+                    user_id=user_id,
+                    step="completed",
+                    game_nick=member.game_nick,
+                    real_name=member.real_name,
+                    discord_nick=member.discord_nick,
+                    perspective=member.perspective or None,
+                    attempts=0,
+                )
+            )
+        return deleted
 
     async def get_group_member_ids(self) -> set[int]:
         db = await self.connect()
