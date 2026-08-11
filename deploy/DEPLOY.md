@@ -315,6 +315,93 @@ caddy-route remove --name analytics
 | kanban | `kanban_board/data/` |
 | bb-clan | `bb_clan_moderator_bot/data/bot.db` |
 
+## Бэкап SQLite в Google Drive
+
+Любые SQLite-базы из `BACKUP_JOBS` бэкапятся ежедневно через systemd timer на Google Drive. По умолчанию в списке только `kanban`, но можно добавить `bb_clan` и другие job'ы.
+
+### Что нужно сделать перед включением
+
+1. Создай сервисный аккаунт Google и JSON-ключ:
+   - Google Cloud Console → APIs & Services → Credentials → Create credentials → Service account.
+   - Включи Google Drive API.
+   - Создай ключ JSON и скачай его.
+   - Создай или выбери папку в Google Drive и открой доступ сервисному аккаунту (Editor).
+   - Скопируй ID папки из URL (`.../folders/FOLDER_ID`).
+
+2. Положи ключ на сервер вне репозитория:
+
+   ```bash
+   mkdir -p /root/BotsRepo/deploy/secrets
+   cp ~/Downloads/bots-backup-sa.json /root/BotsRepo/deploy/secrets/
+   chmod 600 /root/BotsRepo/deploy/secrets/bots-backup-sa.json
+   ```
+
+3. Создай и заполни env-файл:
+
+   ```bash
+   cp deploy/backup.env.example deploy/backup.env
+   nano deploy/backup.env
+   ```
+
+   Заполни:
+   - `BACKUP_JOBS=kanban` (или `BACKUP_JOBS=kanban,bb_clan`)
+   - `KANBAN_BACKUP_ENABLED=true`
+   - `KANBAN_BACKUP_GDRIVE_FOLDER_ID=YOUR_FOLDER_ID`
+   - `KANBAN_BACKUP_GDRIVE_SERVICE_ACCOUNT=/root/BotsRepo/deploy/secrets/bots-backup-sa.json`
+
+   Файл `deploy/backup.env` уже в `.gitignore` — не коммить его.
+
+4. Запусти деплой:
+
+   ```bash
+   ./deploy/deploy.sh
+   ```
+
+   Скрипт поставит `sqlite3`, `google-api-python-client`, скопирует unit/timer и включит таймер.
+
+### Проверка
+
+Запуск вручную:
+
+```bash
+systemctl start sqlite-db-backup.service
+journalctl -u sqlite-db-backup.service -n 50 --no-pager
+```
+
+Статус таймера:
+
+```bash
+systemctl list-timers sqlite-db-backup.timer
+systemctl status sqlite-db-backup.timer --no-pager
+```
+
+По умолчанию бэкап запускается каждый день в 04:00. Старые копии старше `*_BACKUP_RETENTION_DAYS` удаляются и в Google Drive, и локально в `*_BACKUP_LOCAL_DIR`.
+
+### Добавить ещё одну БД
+
+1. Добавь имя job'а в `BACKUP_JOBS` через запятую, например `BACKUP_JOBS=kanban,bb_clan`.
+2. Добавь секцию переменных с таким же префиксом:
+
+   ```ini
+   BB_CLAN_BACKUP_ENABLED=true
+   BB_CLAN_BACKUP_DB_PATH=/root/BotsRepo/bb_clan_moderator_bot/data/bot.db
+   BB_CLAN_BACKUP_LOCAL_DIR=/var/backups/bb-clan
+   BB_CLAN_BACKUP_GDRIVE_FOLDER_ID=YOUR_FOLDER_ID
+   BB_CLAN_BACKUP_GDRIVE_SERVICE_ACCOUNT=/root/BotsRepo/deploy/secrets/bots-backup-sa.json
+   BB_CLAN_BACKUP_RETENTION_DAYS=3
+   ```
+
+3. Перезапусти `sqlite-db-backup.service` для проверки.
+
+### Файлы
+
+- Скрипт бэкапа одной БД: `deploy/scripts/backup-sqlite-to-gdrive.sh`
+- Скрипт запуска всех job'ов: `deploy/scripts/backup-all-db.sh`
+- Загрузчик в Google Drive: `deploy/scripts/gdrive-upload.py`
+- Systemd unit: `deploy/systemd/sqlite-db-backup.service`
+- Systemd timer: `deploy/systemd/sqlite-db-backup.timer`
+- Env-файл: `deploy/backup.env`
+
 ## Устранение 502 на :447
 
 502 = nginx работает, но **backend не отвечает** на `127.0.0.1:8080`.

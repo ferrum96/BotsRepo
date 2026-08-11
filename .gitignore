@@ -74,3 +74,6 @@ nginx-local.conf
 
 # Deploy secrets
 deploy/webhook.env
+deploy/backup.env
+deploy/backup.json
+deploy/secrets/

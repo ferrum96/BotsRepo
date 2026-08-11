@@ -1,0 +1,9 @@
+[Unit]
+Description=SQLite DB backups to Google Drive
+After=network.target
+
+[Service]
+Type=oneshot
+User=root
+EnvironmentFile=-/root/BotsRepo/deploy/backup.env
+ExecStart=/root/BotsRepo/deploy/scripts/backup-all-db.sh

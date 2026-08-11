@@ -318,7 +318,7 @@ install_systemd_units() {
     service_name="${unit_name%.service}"
     dest="${SYSTEMD_DST}/${unit_name}"
 
-    if ! is_managed_service "$service_name"; then
+    if ! is_managed_service "$service_name" && [[ "$service_name" != *-backup ]]; then
       echo "  пропуск ${unit_name}: не в SERVICES"
       continue
     fi
@@ -327,7 +327,30 @@ install_systemd_units() {
       cp "$unit_path" "$dest"
       echo "  → ${unit_name}"
       units_changed=true
-      mark_service_for_restart "$service_name"
+      if is_managed_service "$service_name"; then
+        mark_service_for_restart "$service_name"
+      fi
+    fi
+  done
+
+  for unit_path in "${SYSTEMD_SRC}"/*.timer; do
+    [ -f "$unit_path" ] || continue
+    unit_name=$(basename "$unit_path")
+    dest="${SYSTEMD_DST}/${unit_name}"
+
+    if [ ! -f "$dest" ] || ! cmp -s "$unit_path" "$dest"; then
+      cp "$unit_path" "$dest"
+      echo "  → ${unit_name}"
+      units_changed=true
+    fi
+
+    if ! systemctl is-enabled --quiet "$unit_name" 2>/dev/null; then
+      systemctl enable "$unit_name"
+      echo "  enable ${unit_name}"
+    fi
+    if ! systemctl is-active --quiet "$unit_name" 2>/dev/null; then
+      systemctl start "$unit_name"
+      echo "  start ${unit_name}"
     fi
   done
 
@@ -709,6 +732,29 @@ should_restart_bb_clan_api() {
   return 1
 }
 
+ensure_backup_deps() {
+  if ! command -v sqlite3 >/dev/null 2>&1; then
+    echo "Backup: sqlite3 не найден — устанавливаю..."
+    if command -v apt-get >/dev/null 2>&1; then
+      apt-get update -qq
+      DEBIAN_FRONTEND=noninteractive apt-get install -y -qq sqlite3
+    else
+      echo "Backup: apt-get нет — установи sqlite3 вручную"
+      return 1
+    fi
+  fi
+
+  chmod +x "${REPO_DIR}/deploy/scripts/backup-all-db.sh" 2>/dev/null || true
+  chmod +x "${REPO_DIR}/deploy/scripts/backup-sqlite-to-gdrive.sh" 2>/dev/null || true
+  chmod +x "${REPO_DIR}/deploy/scripts/gdrive-upload.py" 2>/dev/null || true
+
+  if ! python3 -c "import googleapiclient, google.oauth2" >/dev/null 2>&1; then
+    echo "Backup: google-api-python-client не найден — устанавливаю..."
+    python3 -m pip install -q google-api-python-client google-auth-httplib2 --break-system-packages 2>/dev/null \
+      || python3 -m pip install -q google-api-python-client google-auth-httplib2
+  fi
+}
+
 echo "=== Деплой (selective) ==="
 echo ""
 
@@ -731,6 +777,7 @@ detect_changed_services
 disable_unused_services
 install_systemd_units
 bootstrap_missing_artifacts
+ensure_backup_deps
 
 if [ "$NEEDS_KANBAN" = true ]; then
   echo "Kanban Board: npm ci + build..."
