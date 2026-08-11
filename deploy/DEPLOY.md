@@ -332,8 +332,8 @@ caddy-route remove --name analytics
 
    ```bash
    mkdir -p /root/BotsRepo/deploy/secrets
-   cp ~/Downloads/bots-backup-sa.json /root/BotsRepo/deploy/secrets/
-   chmod 600 /root/BotsRepo/deploy/secrets/bots-backup-sa.json
+   cp ~/Downloads/backup-sa.json /root/BotsRepo/deploy/secrets/
+   chmod 600 /root/BotsRepo/deploy/secrets/backup-sa.json
    ```
 
 3. Создай и заполни env-файл:
@@ -347,7 +347,7 @@ caddy-route remove --name analytics
    - `BACKUP_JOBS=kanban` (или `BACKUP_JOBS=kanban,bb_clan`)
    - `KANBAN_BACKUP_ENABLED=true`
    - `KANBAN_BACKUP_GDRIVE_FOLDER_ID=YOUR_FOLDER_ID`
-   - `KANBAN_BACKUP_GDRIVE_SERVICE_ACCOUNT=/root/BotsRepo/deploy/secrets/bots-backup-sa.json`
+   - `KANBAN_BACKUP_GDRIVE_SERVICE_ACCOUNT=/root/BotsRepo/deploy/secrets/backup-sa.json`
 
    Файл `deploy/backup.env` уже в `.gitignore` — не коммить его.
 
@@ -387,7 +387,7 @@ systemctl status sqlite-db-backup.timer --no-pager
    BB_CLAN_BACKUP_DB_PATH=/root/BotsRepo/bb_clan_moderator_bot/data/bot.db
    BB_CLAN_BACKUP_LOCAL_DIR=/var/backups/bb-clan
    BB_CLAN_BACKUP_GDRIVE_FOLDER_ID=YOUR_FOLDER_ID
-   BB_CLAN_BACKUP_GDRIVE_SERVICE_ACCOUNT=/root/BotsRepo/deploy/secrets/bots-backup-sa.json
+   BB_CLAN_BACKUP_GDRIVE_SERVICE_ACCOUNT=/root/BotsRepo/deploy/secrets/backup-sa.json
    BB_CLAN_BACKUP_RETENTION_DAYS=3
    ```
 
