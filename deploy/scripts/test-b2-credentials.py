@@ -27,7 +27,7 @@ def load_env(path: str):
 
 
 def main() -> int:
-    repo_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    repo_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     env_path = os.path.join(repo_dir, "deploy", "backup.env")
 
     if not os.path.exists(env_path):
