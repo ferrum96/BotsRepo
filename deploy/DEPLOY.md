@@ -336,15 +336,20 @@ SQLite-базы из `BACKUP_JOBS` бэкапятся ежедневно чер�
    nano deploy/backup.env
    ```
 
-   Заполни:
+   Заполни общие настройки (применяются ко всем job'ам):
    - `BACKUP_JOBS=kanban` (или `BACKUP_JOBS=kanban,bb_clan`)
-   - `KANBAN_BACKUP_ENABLED=true`
-   - `KANBAN_BACKUP_B2_BUCKET=bots-backups`
-   - `KANBAN_BACKUP_B2_KEY_ID=YOUR_KEY_ID`
-   - `KANBAN_BACKUP_B2_APP_KEY=YOUR_APP_KEY`
-   - `KANBAN_BACKUP_B2_ENDPOINT=https://s3.YOUR_REGION.backblazeb2.com`
+   - `BACKUP_B2_BUCKET=bots-backups`
+   - `BACKUP_B2_KEY_ID=YOUR_KEY_ID`
+   - `BACKUP_B2_APP_KEY=YOUR_APP_KEY`
+   - `BACKUP_B2_ENDPOINT=https://s3.YOUR_REGION.backblazeb2.com`
+   - `BACKUP_RETENTION_DAYS=7`
 
-   Файл `deploy/backup.env` уже в `.gitignore` — не коммить его.
+   И настройки для каждой БД:
+   - `KANBAN_BACKUP_ENABLED=true`
+   - `KANBAN_BACKUP_DB_PATH=/root/BotsRepo/kanban_board/data/kanban.db`
+   - `KANBAN_BACKUP_LOCAL_DIR=/var/backups/kanban`
+
+   Job-specific переменные (`KANBAN_BACKUP_*`, `BB_CLAN_BACKUP_*`) переопределяют общие `BACKUP_*`. Файл `deploy/backup.env` уже в `.gitignore` — не коммить его.
 
 5. Запусти деплой:
 
@@ -385,12 +390,9 @@ systemctl status sqlite-db-backup.timer --no-pager
    BB_CLAN_BACKUP_ENABLED=true
    BB_CLAN_BACKUP_DB_PATH=/root/BotsRepo/bb_clan_moderator_bot/data/bot.db
    BB_CLAN_BACKUP_LOCAL_DIR=/var/backups/bb-clan
-   BB_CLAN_BACKUP_RETENTION_DAYS=3
-   BB_CLAN_BACKUP_B2_BUCKET=bots-backups
-   BB_CLAN_BACKUP_B2_KEY_ID=YOUR_KEY_ID
-   BB_CLAN_BACKUP_B2_APP_KEY=YOUR_APP_KEY
-   BB_CLAN_BACKUP_B2_ENDPOINT=https://s3.YOUR_REGION.backblazeb2.com
    ```
+
+   Если для bb_clan нужен другой bucket или retention, укажи `BB_CLAN_BACKUP_B2_BUCKET` и `BB_CLAN_BACKUP_RETENTION_DAYS`.
 
 3. Перезапусти `sqlite-db-backup.service` для проверки.
 

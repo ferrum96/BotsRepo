@@ -24,20 +24,14 @@ get_env() {
   fi
 }
 
-ENABLED="$(get_env "${PREFIX}ENABLED" "false")"
-DB_PATH="$(get_env "${PREFIX}DB_PATH" "")"
-LOCAL_DIR="$(get_env "${PREFIX}LOCAL_DIR" "/var/backups/${JOB_NAME}")"
-RETENTION_DAYS="$(get_env "${PREFIX}RETENTION_DAYS" "7")"
-
-# Backblaze B2
-B2_BUCKET="$(get_env "${PREFIX}B2_BUCKET" "")"
-B2_KEY_ID="$(get_env "${PREFIX}B2_KEY_ID" "")"
-B2_APP_KEY="$(get_env "${PREFIX}B2_APP_KEY" "")"
-B2_ENDPOINT="$(get_env "${PREFIX}B2_ENDPOINT" "")"
-
-# Google Drive
-GDRIVE_FOLDER_ID="$(get_env "${PREFIX}GDRIVE_FOLDER_ID" "")"
-GDRIVE_SERVICE_ACCOUNT="$(get_env "${PREFIX}GDRIVE_SERVICE_ACCOUNT" "")"
+# Generic defaults (used unless overridden by job-specific *_BACKUP_* variables).
+DEFAULT_RETENTION_DAYS="7"
+DEFAULT_B2_BUCKET=""
+DEFAULT_B2_KEY_ID=""
+DEFAULT_B2_APP_KEY=""
+DEFAULT_B2_ENDPOINT=""
+DEFAULT_GDRIVE_SERVICE_ACCOUNT=""
+DEFAULT_GDRIVE_FOLDER_ID=""
 
 if [ -f "$ENV_FILE" ]; then
   set -a
@@ -45,17 +39,29 @@ if [ -f "$ENV_FILE" ]; then
   source "$ENV_FILE"
   set +a
 
-  ENABLED="$(get_env "${PREFIX}ENABLED" "false")"
-  DB_PATH="$(get_env "${PREFIX}DB_PATH" "")"
-  LOCAL_DIR="$(get_env "${PREFIX}LOCAL_DIR" "/var/backups/${JOB_NAME}")"
-  RETENTION_DAYS="$(get_env "${PREFIX}RETENTION_DAYS" "7")"
-  B2_BUCKET="$(get_env "${PREFIX}B2_BUCKET" "")"
-  B2_KEY_ID="$(get_env "${PREFIX}B2_KEY_ID" "")"
-  B2_APP_KEY="$(get_env "${PREFIX}B2_APP_KEY" "")"
-  B2_ENDPOINT="$(get_env "${PREFIX}B2_ENDPOINT" "")"
-  GDRIVE_FOLDER_ID="$(get_env "${PREFIX}GDRIVE_FOLDER_ID" "")"
-  GDRIVE_SERVICE_ACCOUNT="$(get_env "${PREFIX}GDRIVE_SERVICE_ACCOUNT" "")"
+  DEFAULT_RETENTION_DAYS="${BACKUP_RETENTION_DAYS:-7}"
+  DEFAULT_B2_BUCKET="${BACKUP_B2_BUCKET:-}"
+  DEFAULT_B2_KEY_ID="${BACKUP_B2_KEY_ID:-}"
+  DEFAULT_B2_APP_KEY="${BACKUP_B2_APP_KEY:-}"
+  DEFAULT_B2_ENDPOINT="${BACKUP_B2_ENDPOINT:-}"
+  DEFAULT_GDRIVE_SERVICE_ACCOUNT="${BACKUP_GDRIVE_SERVICE_ACCOUNT:-}"
+  DEFAULT_GDRIVE_FOLDER_ID="${BACKUP_GDRIVE_FOLDER_ID:-}"
 fi
+
+ENABLED="$(get_env "${PREFIX}ENABLED" "false")"
+DB_PATH="$(get_env "${PREFIX}DB_PATH" "")"
+LOCAL_DIR="$(get_env "${PREFIX}LOCAL_DIR" "/var/backups/${JOB_NAME}")"
+RETENTION_DAYS="$(get_env "${PREFIX}RETENTION_DAYS" "${DEFAULT_RETENTION_DAYS}")"
+
+# Backblaze B2
+B2_BUCKET="$(get_env "${PREFIX}B2_BUCKET" "${DEFAULT_B2_BUCKET}")"
+B2_KEY_ID="$(get_env "${PREFIX}B2_KEY_ID" "${DEFAULT_B2_KEY_ID}")"
+B2_APP_KEY="$(get_env "${PREFIX}B2_APP_KEY" "${DEFAULT_B2_APP_KEY}")"
+B2_ENDPOINT="$(get_env "${PREFIX}B2_ENDPOINT" "${DEFAULT_B2_ENDPOINT}")"
+
+# Google Drive
+GDRIVE_FOLDER_ID="$(get_env "${PREFIX}GDRIVE_FOLDER_ID" "${DEFAULT_GDRIVE_FOLDER_ID}")"
+GDRIVE_SERVICE_ACCOUNT="$(get_env "${PREFIX}GDRIVE_SERVICE_ACCOUNT" "${DEFAULT_GDRIVE_SERVICE_ACCOUNT}")"
 
 if [ "$ENABLED" != "true" ]; then
   echo "${JOB_NAME} backup skipped: ${PREFIX}ENABLED != true"
