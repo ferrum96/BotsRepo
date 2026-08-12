@@ -747,6 +747,7 @@ ensure_backup_deps() {
   chmod +x "${REPO_DIR}/deploy/scripts/backup-all-db.sh" 2>/dev/null || true
   chmod +x "${REPO_DIR}/deploy/scripts/backup-sqlite-to-b2.sh" 2>/dev/null || true
   chmod +x "${REPO_DIR}/deploy/scripts/b2-upload.py" 2>/dev/null || true
+  chmod +x "${REPO_DIR}/deploy/scripts/restore-from-b2.py" 2>/dev/null || true
 
   if ! python3 -c "import boto3" >/dev/null 2>&1; then
     echo "Backup: boto3 не найден — устанавливаю..."

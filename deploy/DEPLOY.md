@@ -397,6 +397,23 @@ systemctl status sqlite-db-backup.timer --no-pager
 - Systemd timer: `deploy/systemd/sqlite-db-backup.timer`
 - Env-файл: `deploy/backup.env`
 
+### Восстановление из B2
+
+Скрипт `deploy/scripts/restore-from-b2.py` скачивает выбранный бэкап, останавливает сервис, заменяет SQLite-файл БД и запускает сервис заново. Перед заменой текущая БД сохраняется как `<db>.before-restore-<timestamp>`.
+
+```bash
+# последний бэкап (с подтверждением)
+python3 deploy/scripts/restore-from-b2.py kanban
+
+# бэкап за конкретную дату
+python3 deploy/scripts/restore-from-b2.py kanban --date 2026-08-12
+
+# без подтверждения
+python3 deploy/scripts/restore-from-b2.py bb_clan --force
+```
+
+Скрипт работает только с job'ами `kanban` и `bb_clan`. Убедись, что `deploy/backup.env` заполнен и содержит `*_BACKUP_DB_PATH`.
+
 ## Устранение 502 на :447
 
 502 = nginx работает, но **backend не отвечает** на `127.0.0.1:8080`.
