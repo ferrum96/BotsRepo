@@ -745,14 +745,26 @@ ensure_backup_deps() {
   fi
 
   chmod +x "${REPO_DIR}/deploy/scripts/backup-all-db.sh" 2>/dev/null || true
-  chmod +x "${REPO_DIR}/deploy/scripts/backup-sqlite-to-gdrive.sh" 2>/dev/null || true
+  chmod +x "${REPO_DIR}/deploy/scripts/backup-sqlite-to-cloud.sh" 2>/dev/null || true
+  chmod +x "${REPO_DIR}/deploy/scripts/b2-upload.py" 2>/dev/null || true
   chmod +x "${REPO_DIR}/deploy/scripts/gdrive-upload.py" 2>/dev/null || true
   chmod +x "${REPO_DIR}/deploy/scripts/gdrive-get-refresh-token.py" 2>/dev/null || true
 
-  if ! python3 -c "import googleapiclient, google.oauth2, google_auth_oauthlib" >/dev/null 2>&1; then
-    echo "Backup: google packages не найдены — устанавливаю..."
-    python3 -m pip install -q google-api-python-client google-auth-httplib2 google-auth-oauthlib --break-system-packages 2>/dev/null \
-      || python3 -m pip install -q google-api-python-client google-auth-httplib2 google-auth-oauthlib
+  local missing_packages=()
+  if ! python3 -c "import boto3" >/dev/null 2>&1; then
+    missing_packages+=("boto3")
+  fi
+  if ! python3 -c "import googleapiclient, google.oauth2" >/dev/null 2>&1; then
+    missing_packages+=("google-api-python-client" "google-auth-httplib2")
+  fi
+  if ! python3 -c "import google_auth_oauthlib" >/dev/null 2>&1; then
+    missing_packages+=("google-auth-oauthlib")
+  fi
+
+  if [ ${#missing_packages[@]} -gt 0 ]; then
+    echo "Backup: устанавливаю python-пакеты: ${missing_packages[*]}"
+    python3 -m pip install -q "${missing_packages[@]}" --break-system-packages 2>/dev/null \
+      || python3 -m pip install -q "${missing_packages[@]}"
   fi
 }
 

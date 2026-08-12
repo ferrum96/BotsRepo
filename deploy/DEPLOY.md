@@ -315,39 +315,20 @@ caddy-route remove --name analytics
 | kanban | `kanban_board/data/` |
 | bb-clan | `bb_clan_moderator_bot/data/bot.db` |
 
-## Бэкап SQLite в Google Drive
+## Бэкап SQLite
 
-Любые SQLite-базы из `BACKUP_JOBS` бэкапятся ежедневно через systemd timer на Google Drive. По умолчанию в списке только `kanban`, но можно добавить `bb_clan` и другие job'ы.
+SQLite-базы из `BACKUP_JOBS` бэкапятся ежедневно через systemd timer. По умолчанию в списке только `kanban`, но можно добавить `bb_clan` и другие job'ы.
+
+Поддерживаются два хранилища: **Backblaze B2** (рекомендуется, 10 GB бесплатно, нет OAuth) и **Google Drive** (сложнее с OAuth/квотами). Если настроены оба, используется B2.
 
 ### Что нужно сделать перед включением
 
-Скрипт `gdrive-upload.py` понимает два типа credentials: **service account** (нужен Google Workspace + Shared Drive) и **OAuth refresh token** (работает с обычным Gmail).
+#### Вариант 1: Backblaze B2 (рекомендуется)
 
-#### Вариант 1: OAuth refresh token (обычный Gmail)
-
-1. В Google Cloud Console создай OAuth 2.0 credentials:
-   - APIs & Services → Credentials → Create credentials → OAuth client ID.
-   - Application type: **Desktop app**.
-   - Скачай `client_secret.json`.
-   - Включи Google Drive API.
-
-2. На машине с браузером (ноутбук) запусти helper:
-
-   ```bash
-   python3 deploy/scripts/gdrive-get-refresh-token.py \
-     --client-secrets ~/Downloads/client_secret.json \
-     --output deploy/secrets/gdrive-oauth.json
-   ```
-
-   Откроется браузер, авторизуй приложение. На выходе получится `gdrive-oauth.json`.
-
-3. Скопируй credentials на VPS:
-
-   ```bash
-   chmod 600 deploy/secrets/gdrive-oauth.json
-   scp deploy/secrets/gdrive-oauth.json root@ВАШ_IP:/root/BotsRepo/deploy/secrets/
-   ```
-
+1. Зарегистрируйся на [backblaze.com/b2](https://www.backblaze.com/b2/cloud-storage.html) и создай bucket, например `bots-backups`.
+2. Создай Application Key в разделе App Keys:
+   - скопируй **keyID** и **applicationKey**.
+3. В настройках bucket найди **S3 Endpoint** (например, `https://s3.eu-central-003.backblazeb2.com`).
 4. Создай и заполни env-файл:
 
    ```bash
@@ -358,8 +339,10 @@ caddy-route remove --name analytics
    Заполни:
    - `BACKUP_JOBS=kanban` (или `BACKUP_JOBS=kanban,bb_clan`)
    - `KANBAN_BACKUP_ENABLED=true`
-   - `KANBAN_BACKUP_GDRIVE_FOLDER_ID=YOUR_FOLDER_ID`
-   - `KANBAN_BACKUP_GDRIVE_SERVICE_ACCOUNT=/root/BotsRepo/deploy/secrets/gdrive-oauth.json`
+   - `KANBAN_BACKUP_B2_BUCKET=bots-backups`
+   - `KANBAN_BACKUP_B2_KEY_ID=YOUR_KEY_ID`
+   - `KANBAN_BACKUP_B2_APP_KEY=YOUR_APP_KEY`
+   - `KANBAN_BACKUP_B2_ENDPOINT=https://s3.YOUR_REGION.backblazeb2.com`
 
    Файл `deploy/backup.env` уже в `.gitignore` — не коммить его.
 
@@ -369,9 +352,64 @@ caddy-route remove --name analytics
    ./deploy/deploy.sh
    ```
 
-   Скрипт поставит `sqlite3`, `google-api-python-client`, скопирует unit/timer и включит таймер.
+   Скрипт поставит `sqlite3`, `boto3`, скопирует unit/timer и включит таймер.
 
-#### Вариант 2: Service account (Google Workspace)
+#### Вариант 2: Google Drive
+
+См. ниже раздел [Google Drive](#google-drive).
+
+### Проверка
+
+Запуск вручную:
+
+```bash
+systemctl start sqlite-db-backup.service
+journalctl -u sqlite-db-backup.service -n 50 --no-pager
+```
+
+Статус таймера:
+
+```bash
+systemctl list-timers sqlite-db-backup.timer
+systemctl status sqlite-db-backup.timer --no-pager
+```
+
+По умолчанию бэкап запускается каждый день в 04:00. Старые копии старше `*_BACKUP_RETENTION_DAYS` удаляются и в облаке, и локально в `*_BACKUP_LOCAL_DIR`.
+
+### Добавить ещё одну БД
+
+1. Добавь имя job'а в `BACKUP_JOBS` через запятую, например `BACKUP_JOBS=kanban,bb_clan`.
+2. Добавь секцию переменных с таким же префиксом:
+
+   ```ini
+   BB_CLAN_BACKUP_ENABLED=true
+   BB_CLAN_BACKUP_DB_PATH=/root/BotsRepo/bb_clan_moderator_bot/data/bot.db
+   BB_CLAN_BACKUP_LOCAL_DIR=/var/backups/bb-clan
+   BB_CLAN_BACKUP_RETENTION_DAYS=3
+   BB_CLAN_BACKUP_B2_BUCKET=bots-backups
+   BB_CLAN_BACKUP_B2_KEY_ID=YOUR_KEY_ID
+   BB_CLAN_BACKUP_B2_APP_KEY=YOUR_APP_KEY
+   BB_CLAN_BACKUP_B2_ENDPOINT=https://s3.YOUR_REGION.backblazeb2.com
+   ```
+
+3. Перезапусти `sqlite-db-backup.service` для проверки.
+
+### Файлы
+
+- Скрипт бэкапа одной БД: `deploy/scripts/backup-sqlite-to-cloud.sh`
+- Скрипт запуска всех job'ов: `deploy/scripts/backup-all-db.sh`
+- Загрузчик в Backblaze B2: `deploy/scripts/b2-upload.py`
+- Загрузчик в Google Drive: `deploy/scripts/gdrive-upload.py`
+- Получение OAuth refresh token: `deploy/scripts/gdrive-get-refresh-token.py`
+- Systemd unit: `deploy/systemd/sqlite-db-backup.service`
+- Systemd timer: `deploy/systemd/sqlite-db-backup.timer`
+- Env-файл: `deploy/backup.env`
+
+### Google Drive
+
+Google Drive поддерживается через service account (нужен Google Workspace + Shared Drive) или OAuth refresh token (обычный Gmail).
+
+#### Service account (Google Workspace)
 
 1. Создай сервисный аккаунт Google и JSON-ключ:
    - Google Cloud Console → APIs & Services → Credentials → Create credentials → Service account.
@@ -392,51 +430,36 @@ caddy-route remove --name analytics
    ```
 
 5. В `deploy/backup.env` пропиши:
+   - `KANBAN_BACKUP_GDRIVE_FOLDER_ID=YOUR_FOLDER_ID`
    - `KANBAN_BACKUP_GDRIVE_SERVICE_ACCOUNT=/root/BotsRepo/deploy/secrets/backup-sa.json`
 
-### Проверка
+#### OAuth refresh token (обычный Gmail)
 
-Запуск вручную:
+1. В Google Cloud Console создай OAuth 2.0 credentials:
+   - APIs & Services → Credentials → Create credentials → OAuth client ID.
+   - Application type: **Desktop app**.
+   - Скачай `client_secret.json`.
+   - Включи Google Drive API.
+   - Добавь свой email в **Test users** на OAuth consent screen.
 
-```bash
-systemctl start sqlite-db-backup.service
-journalctl -u sqlite-db-backup.service -n 50 --no-pager
-```
+2. На машине с браузером (ноутбук) запусти helper:
 
-Статус таймера:
-
-```bash
-systemctl list-timers sqlite-db-backup.timer
-systemctl status sqlite-db-backup.timer --no-pager
-```
-
-По умолчанию бэкап запускается каждый день в 04:00. Старые копии старше `*_BACKUP_RETENTION_DAYS` удаляются и в Google Drive, и локально в `*_BACKUP_LOCAL_DIR`.
-
-### Добавить ещё одну БД
-
-1. Добавь имя job'а в `BACKUP_JOBS` через запятую, например `BACKUP_JOBS=kanban,bb_clan`.
-2. Добавь секцию переменных с таким же префиксом:
-
-   ```ini
-   BB_CLAN_BACKUP_ENABLED=true
-   BB_CLAN_BACKUP_DB_PATH=/root/BotsRepo/bb_clan_moderator_bot/data/bot.db
-   BB_CLAN_BACKUP_LOCAL_DIR=/var/backups/bb-clan
-   BB_CLAN_BACKUP_GDRIVE_FOLDER_ID=YOUR_FOLDER_ID
-   BB_CLAN_BACKUP_GDRIVE_SERVICE_ACCOUNT=/root/BotsRepo/deploy/secrets/gdrive-oauth.json
-   BB_CLAN_BACKUP_RETENTION_DAYS=3
+   ```bash
+   python3 deploy/scripts/gdrive-get-refresh-token.py \
+     --client-secrets ~/Downloads/client_secret.json \
+     --output deploy/secrets/gdrive-oauth.json
    ```
 
-3. Перезапусти `sqlite-db-backup.service` для проверки.
+3. Скопируй credentials на VPS:
 
-### Файлы
+   ```bash
+   chmod 600 deploy/secrets/gdrive-oauth.json
+   scp deploy/secrets/gdrive-oauth.json root@ВАШ_IP:/root/BotsRepo/deploy/secrets/
+   ```
 
-- Скрипт бэкапа одной БД: `deploy/scripts/backup-sqlite-to-gdrive.sh`
-- Скрипт запуска всех job'ов: `deploy/scripts/backup-all-db.sh`
-- Загрузчик в Google Drive: `deploy/scripts/gdrive-upload.py`
-- Получение OAuth refresh token: `deploy/scripts/gdrive-get-refresh-token.py`
-- Systemd unit: `deploy/systemd/sqlite-db-backup.service`
-- Systemd timer: `deploy/systemd/sqlite-db-backup.timer`
-- Env-файл: `deploy/backup.env`
+4. В `deploy/backup.env` пропиши:
+   - `KANBAN_BACKUP_GDRIVE_FOLDER_ID=YOUR_FOLDER_ID`
+   - `KANBAN_BACKUP_GDRIVE_SERVICE_ACCOUNT=/root/BotsRepo/deploy/secrets/gdrive-oauth.json`
 
 ## Устранение 502 на :447
 
