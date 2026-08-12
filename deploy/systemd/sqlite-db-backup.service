@@ -1,5 +1,5 @@
 [Unit]
-Description=SQLite DB backups to Google Drive
+Description=SQLite DB backups to Backblaze B2
 After=network.target
 
 [Service]

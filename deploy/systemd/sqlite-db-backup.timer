@@ -1,5 +1,5 @@
 [Unit]
-Description=Daily SQLite DB backups to Google Drive
+Description=Daily SQLite DB backups to Backblaze B2
 
 [Timer]
 OnCalendar=*-*-* 04:00:00
