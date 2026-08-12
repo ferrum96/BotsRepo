@@ -1,22 +1,49 @@
 #!/usr/bin/env python3
-"""Upload a file to Google Drive using a service account and delete old backups."""
+"""Upload a file to Google Drive using a service account or OAuth refresh token."""
 
 import argparse
+import json
 import os
 import sys
 from datetime import datetime, timedelta, timezone
 
-from google.oauth2 import service_account
+from google.auth.transport.requests import Request
+from google.oauth2 import credentials as oauth_credentials, service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 
 SCOPES = ["https://www.googleapis.com/auth/drive.file"]
 
 
-def get_drive_service(credentials_path: str):
-    credentials = service_account.Credentials.from_service_account_file(
-        credentials_path, scopes=SCOPES
+def load_credentials(credentials_path: str):
+    with open(credentials_path, "r") as f:
+        info = json.load(f)
+
+    if info.get("type") == "service_account":
+        return service_account.Credentials.from_service_account_file(
+            credentials_path, scopes=SCOPES
+        )
+
+    if "refresh_token" not in info:
+        raise ValueError(
+            "credentials file must contain either 'type': 'service_account' "
+            "or an OAuth 'refresh_token'"
+        )
+
+    creds = oauth_credentials.Credentials(
+        token=None,
+        refresh_token=info["refresh_token"],
+        token_uri=info.get("token_uri", "https://oauth2.googleapis.com/token"),
+        client_id=info["client_id"],
+        client_secret=info["client_secret"],
+        scopes=SCOPES,
     )
+    creds.refresh(Request())
+    return creds
+
+
+def get_drive_service(credentials_path: str):
+    credentials = load_credentials(credentials_path)
     return build("drive", "v3", credentials=credentials, static_discovery=False)
 
 
@@ -73,7 +100,7 @@ def main() -> int:
     parser.add_argument("--file", required=True, help="path to file to upload")
     parser.add_argument("--folder-id", required=True, help="Google Drive folder ID")
     parser.add_argument(
-        "--credentials", required=True, help="path to service account JSON key"
+        "--credentials", required=True, help="path to service account JSON or OAuth credentials JSON"
     )
     parser.add_argument(
         "--retention-days", type=int, default=0, help="delete backups older than N days"
@@ -90,7 +117,12 @@ def main() -> int:
         print(f"credentials not found: {args.credentials}", file=sys.stderr)
         return 1
 
-    service = get_drive_service(args.credentials)
+    try:
+        service = get_drive_service(args.credentials)
+    except Exception as exc:
+        print(f"failed to load credentials: {exc}", file=sys.stderr)
+        return 1
+
     file_id = upload_file(service, args.file, args.folder_id)
     print(f"uploaded: {args.file} -> {file_id}")
 
