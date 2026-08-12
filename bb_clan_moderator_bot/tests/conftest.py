@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import importlib
 import sqlite3
 import sys
@@ -10,6 +11,7 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock
 
+import bcrypt
 import httpx
 import pytest
 from fastapi.testclient import TestClient
@@ -19,6 +21,7 @@ from bot.database import Database
 
 
 API_KEY = "test-dashboard-secret"
+JWT_SECRET = "test-jwt-secret"
 BOT_TOKEN = "123456:TEST_BOT_TOKEN"
 GROUP_ID = -1001234567890
 
@@ -157,6 +160,33 @@ def seed_blacklist_sync(db_path: str | Path, user_id: int, reason: str) -> None:
         conn.commit()
 
 
+def seed_dashboard_user_sync(
+    db_path: str | Path,
+    username: str = "admin",
+    password: str = "admin123",
+    display_name: str = "Test Admin",
+) -> int:
+    """Create a dashboard user and return the user id."""
+    password_hash = bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt(rounds=10)).decode(
+        "utf-8"
+    )
+    now = datetime.now(timezone.utc).isoformat()
+    with sqlite3.connect(db_path) as conn:
+        cursor = conn.execute(
+            """
+            INSERT INTO dashboard_users (username, password_hash, display_name, created_at)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(username) DO UPDATE SET
+                password_hash = excluded.password_hash,
+                display_name = excluded.display_name,
+                created_at = excluded.created_at
+            """,
+            (username, password_hash, display_name, now),
+        )
+        conn.commit()
+        return cursor.lastrowid
+
+
 class TelegramMockTransport(httpx.AsyncBaseTransport):
     """Respond to Telegram Bot API calls used by the dashboard backend."""
 
@@ -226,6 +256,7 @@ def api_module(
     monkeypatch.setenv("GROUP_ID", str(GROUP_ID))
     monkeypatch.setenv("DATABASE_PATH", str(db_path))
     monkeypatch.setenv("DASHBOARD_API_KEY", API_KEY)
+    monkeypatch.setenv("DASHBOARD_JWT_SECRET", JWT_SECRET)
     monkeypatch.setenv("ADMIN_IDS", "42")
     monkeypatch.setenv("TELEGRAM_GROUP_LINK", "https://t.me/+testgroup")
     monkeypatch.setenv("DISCORD_LINK", "https://discord.gg/test")
@@ -245,6 +276,16 @@ def api_module(
 
     module = importlib.import_module("dashboard.backend.main")
     module._test_db_path = str(db_path)  # type: ignore[attr-defined]
+
+    # Ensure tables exist before any test runs.
+    async def _init_db() -> None:
+        db = Database(str(db_path))
+        await db.connect()
+        await db.init()
+        if db._db is not None:
+            await db._db.close()
+
+    asyncio.run(_init_db())
     return module
 
 
@@ -260,7 +301,20 @@ def db_path(api_module) -> str:
 
 
 @pytest.fixture
-def auth_headers() -> dict[str, str]:
+def auth_headers(api_module, db_path) -> dict[str, str]:
+    user_id = seed_dashboard_user_sync(db_path)
+    import dashboard.backend.auth as auth_module
+
+    token = auth_module.create_token(
+        auth_module.DashboardUserOut(
+            id=user_id, username="admin", display_name="Test Admin"
+        )
+    )
+    return {"Authorization": f"Bearer {token}"}
+
+
+@pytest.fixture
+def api_key_headers() -> dict[str, str]:
     return {"X-API-Key": API_KEY}
 
 

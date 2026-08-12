@@ -15,11 +15,11 @@ def test_e2e_member_kick_deletes_without_blacklist(api_client, auth_headers, db_
         track_in_group=True,
     )
 
-    members_before = api_client.get("/api/members")
+    members_before = api_client.get("/api/members", headers=auth_headers)
     assert members_before.status_code == 200
     assert any(m["user_id"] == 1001 for m in members_before.json())
 
-    stats_before = api_client.get("/api/stats").json()
+    stats_before = api_client.get("/api/stats", headers=auth_headers).json()
     assert stats_before["total_members"] == 1
     assert stats_before["total_blacklist"] == 0
 
@@ -27,12 +27,12 @@ def test_e2e_member_kick_deletes_without_blacklist(api_client, auth_headers, db_
     assert kick.status_code == 200
     assert kick.json() == {"ok": True}
 
-    members_after_kick = api_client.get("/api/members").json()
+    members_after_kick = api_client.get("/api/members", headers=auth_headers).json()
     assert all(m["user_id"] != 1001 for m in members_after_kick)
 
-    assert api_client.get("/api/blacklist").json() == []
+    assert api_client.get("/api/blacklist", headers=auth_headers).json() == []
 
-    stats_mid = api_client.get("/api/stats").json()
+    stats_mid = api_client.get("/api/stats", headers=auth_headers).json()
     assert stats_mid["total_members"] == 0
     assert stats_mid["total_blacklist"] == 0
 
@@ -46,11 +46,11 @@ def test_e2e_survey_failure_unblock_requires_survey(api_client, auth_headers, db
     assert unblock.json().get("requires_survey") is True
 
     # User is cleared from blacklist but not auto-restored to members/group.
-    assert api_client.get("/api/blacklist").json() == []
-    assert api_client.get("/api/members").json() == []
+    assert api_client.get("/api/blacklist", headers=auth_headers).json() == []
+    assert api_client.get("/api/members", headers=auth_headers).json() == []
 
 
-def test_e2e_inactive_member_appears_in_inactive_list(api_client, db_path):
+def test_e2e_inactive_member_appears_in_inactive_list(api_client, auth_headers, db_path):
     seed_member_sync(
         db_path,
         50,
@@ -61,13 +61,13 @@ def test_e2e_inactive_member_appears_in_inactive_list(api_client, db_path):
     )
     seed_member_sync(db_path, 51, game_nick="Active", track_in_group=True)
 
-    inactive = api_client.get("/api/inactive-members").json()
+    inactive = api_client.get("/api/inactive-members", headers=auth_headers).json()
     assert len(inactive) == 1
     assert inactive[0]["user_id"] == 50
     assert inactive[0]["game_nick"] == "Sleepy"
     assert inactive[0]["last_match_at"] == "2026-01-01 12:00:00"
 
-    members = api_client.get("/api/members").json()
+    members = api_client.get("/api/members", headers=auth_headers).json()
     assert {m["user_id"] for m in members} == {50, 51}
 
 

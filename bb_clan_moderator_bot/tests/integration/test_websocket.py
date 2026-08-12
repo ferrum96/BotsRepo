@@ -7,6 +7,7 @@ from dashboard.backend.events import EventHub
 from tests.conftest import API_KEY, seed_member_sync
 
 
+
 @pytest.mark.asyncio
 async def test_event_hub_broadcast_reaches_clients():
     hub = EventHub()
@@ -31,14 +32,14 @@ def test_ws_requires_token_when_api_key_configured(api_client: TestClient):
             ws.receive_json()
 
 
-def test_ws_connect_and_internal_event_broadcast(api_client: TestClient, auth_headers):
+def test_ws_connect_and_internal_event_broadcast(api_client: TestClient, api_key_headers):
     with api_client.websocket_connect(f"/ws?token={API_KEY}") as ws:
         hello = ws.receive_json()
         assert hello["type"] == "connected"
 
         response = api_client.post(
             "/internal/events",
-            headers=auth_headers,
+            headers=api_key_headers,
             json={"type": "dashboard.refresh", "reason": "test"},
         )
         assert response.status_code == 200

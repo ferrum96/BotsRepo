@@ -1,23 +1,27 @@
 const API_BASE = import.meta.env.VITE_API_URL || ''
-const API_KEY = import.meta.env.VITE_DASHBOARD_API_KEY || ''
+const TOKEN_KEY = 'bb-clan-dashboard-token'
 
-async function fetchJson<T>(path: string, options?: RequestInit): Promise<T> {
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-    ...(options?.headers as Record<string, string> | undefined),
+export type AuthUser = {
+  id: number
+  username: string
+  display_name: string
+}
+
+export function getToken() {
+  try {
+    return localStorage.getItem(TOKEN_KEY)
+  } catch {
+    return null
   }
-  if (API_KEY) {
-    headers['X-API-Key'] = API_KEY
+}
+
+export function setToken(token: string | null) {
+  try {
+    if (token) localStorage.setItem(TOKEN_KEY, token)
+    else localStorage.removeItem(TOKEN_KEY)
+  } catch {
+    // Ignore Safari private mode storage errors.
   }
-  const response = await fetch(`${API_BASE}${path}`, {
-    ...options,
-    headers,
-  })
-  if (!response.ok) {
-    const text = await response.text().catch(() => response.statusText)
-    throw new Error(`HTTP ${response.status}: ${text}`)
-  }
-  return response.json()
 }
 
 export interface Member {
@@ -59,24 +63,70 @@ export interface InactiveMember {
   last_match_checked_at: string | null
 }
 
-export const fetchMembers = () => fetchJson<Member[]>('/api/members')
+type RequestOptions = RequestInit & {
+  skipAuth?: boolean
+}
 
-export const fetchBlacklist = () => fetchJson<BlacklistEntry[]>('/api/blacklist')
+async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
+  const headers = new Headers(options.headers)
+  if (!headers.has('Content-Type') && options.body) {
+    headers.set('Content-Type', 'application/json')
+  }
 
-export const fetchInactiveMembers = () => fetchJson<InactiveMember[]>('/api/inactive-members')
+  if (!options.skipAuth) {
+    const token = getToken()
+    if (token) headers.set('Authorization', `Bearer ${token}`)
+  }
+
+  const response = await fetch(`${API_BASE}${path}`, {
+    ...options,
+    headers,
+    cache: 'no-store',
+  })
+
+  if (response.status === 401 && !options.skipAuth) {
+    setToken(null)
+    if (typeof window !== 'undefined' && !window.location.pathname.startsWith('/login')) {
+      window.location.assign('/login')
+    }
+    throw new Error('Unauthorized')
+  }
+
+  if (!response.ok) {
+    const text = await response.text().catch(() => response.statusText)
+    throw new Error(`HTTP ${response.status}: ${text}`)
+  }
+
+  return response.json()
+}
+
+export const fetchMembers = () => request<Member[]>('/api/members')
+
+export const fetchBlacklist = () => request<BlacklistEntry[]>('/api/blacklist')
+
+export const fetchInactiveMembers = () => request<InactiveMember[]>('/api/inactive-members')
 
 export const kickMember = (userId: number) =>
-  fetchJson<{ ok: boolean }>(`/api/members/${userId}/kick`, {
+  request<{ ok: boolean }>(`/api/members/${userId}/kick`, {
     method: 'POST',
   })
 
 export const updateMember = (userId: number, payload: MemberUpdate) =>
-  fetchJson<Member>(`/api/members/${userId}`, {
+  request<Member>(`/api/members/${userId}`, {
     method: 'PATCH',
     body: JSON.stringify(payload),
   })
 
 export const unblockBlacklistMember = (userId: number) =>
-  fetchJson<{ ok: boolean }>(`/api/blacklist/${userId}/unblock`, {
+  request<{ ok: boolean }>(`/api/blacklist/${userId}/unblock`, {
     method: 'POST',
   })
+
+export const login = (username: string, password: string) =>
+  request<{ token: string; user: AuthUser }>('/api/auth/login', {
+    method: 'POST',
+    body: JSON.stringify({ username, password }),
+    skipAuth: true,
+  })
+
+export const me = () => request<{ user: AuthUser }>('/api/auth/me')

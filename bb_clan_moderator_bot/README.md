@@ -138,10 +138,23 @@ Legacy-доступ через host-nginx порт:
 
 ## Безопасность дашборда
 
-Если `DASHBOARD_API_KEY` задан, все `POST` endpoints (kick, unblock и т.д.)
-требуют заголовок `X-API-Key`. В production фронтенд передаёт его через
-`VITE_DASHBOARD_API_KEY`. Если ключ не задан, дашборд работает без аутентификации
-(удобно для локальной разработки).
+Дашборд требует аутентификации по JWT. Пользователи хранятся в таблице
+`dashboard_users`, а токены подписываются `DASHBOARD_JWT_SECRET` (HS256, 7 дней).
+
+Создать первого пользователя:
+
+```bash
+python dashboard/backend/scripts/add_dashboard_user.py admin 'StrongPass!' "Администратор"
+```
+
+Или через npm:
+
+```bash
+npm run db:add-user -- admin 'StrongPass!' "Администратор"
+```
+
+`DASHBOARD_API_KEY` остаётся для внутреннего пуша событий из бота в
+`/internal/events`.
 
 ## Настройка
 
@@ -176,7 +189,8 @@ Legacy-доступ через host-nginx порт:
 | `DATABASE_PATH` | Путь к SQLite-файлу (по умолчанию `data/bot.db`) |
 | `MAX_SURVEY_ATTEMPTS` | Максимальное число попыток опроса (по умолчанию 2) |
 | `DASHBOARD_PORT` | Порт FastAPI дашборда (по умолчанию 8080) |
-| `DASHBOARD_API_KEY` | API-ключ для защиты мутающих endpoints (опционально) |
+| `DASHBOARD_API_KEY` | API-ключ для внутреннего пуша событий бота (`/internal/events`) |
+| `DASHBOARD_JWT_SECRET` | Секрет для подписи JWT-токенов дашборда (обязательно в production) |
 | `DASHBOARD_EVENTS_URL` | URL API для пуша событий из бота (`http://127.0.0.1:8081` в dev) |
 | `GROUP_SYNC_INTERVAL_MINUTES` | Интервал фоновой сверки состава группы (по умолчанию 10) |
 | `TELEGRAM_API_ID` / `TELEGRAM_API_HASH` | Для полного импорта участников (Telethon, my.telegram.org) |

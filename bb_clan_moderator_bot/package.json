@@ -1,0 +1,8 @@
+{
+  "name": "bb-clan-moderator-bot",
+  "private": true,
+  "version": "1.0.0",
+  "scripts": {
+    "db:add-user": "python3 dashboard/backend/scripts/add_dashboard_user.py"
+  }
+}

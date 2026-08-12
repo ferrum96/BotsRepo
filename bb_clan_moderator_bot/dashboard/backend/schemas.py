@@ -83,3 +83,23 @@ class StatsOut(BaseModel):
 
 class HealthOut(BaseModel):
     status: str
+
+
+class LoginIn(BaseModel):
+    username: str
+    password: str
+
+
+class DashboardUserOut(BaseModel):
+    id: int
+    username: str
+    display_name: str
+
+
+class LoginOut(BaseModel):
+    token: str
+    user: DashboardUserOut
+
+
+class MeOut(BaseModel):
+    user: DashboardUserOut

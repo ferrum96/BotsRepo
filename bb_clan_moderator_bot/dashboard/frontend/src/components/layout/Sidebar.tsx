@@ -1,4 +1,5 @@
-import { NavLink } from 'react-router-dom'
+import { NavLink, useNavigate } from 'react-router-dom'
+import { useAuth } from '../../lib/auth'
 
 interface NavItem {
   to: string
@@ -33,6 +34,14 @@ export function Sidebar({
   onToggleCollapse,
   onCloseMobile,
 }: SidebarProps) {
+  const { user, logout } = useAuth()
+  const navigate = useNavigate()
+
+  const handleLogout = () => {
+    logout()
+    navigate('/login', { replace: true })
+  }
+
   return (
     <nav
       className={`flex flex-col h-dvh min-h-screen overflow-y-auto py-stack-lg bg-[#060b14] border-r border-outline-level fixed left-0 top-0 z-50 transition-all duration-200 w-[min(260px,85vw)] ${isCollapsed ? 'md:w-[88px]' : 'md:w-sidebar'
@@ -101,6 +110,26 @@ export function Sidebar({
           </li>
         ))}
       </ul>
+
+      <div className={`mt-auto pt-4 border-t border-outline-level ${isCollapsed ? 'px-container md:px-4' : 'px-container'}`}>
+        <div className={`flex items-center gap-3 ${isCollapsed ? 'md:justify-center' : ''}`}>
+          <span className="material-symbols-outlined text-on-surface-variant icon-thin">account_circle</span>
+          <div className={`min-w-0 ${isCollapsed ? 'md:hidden' : ''}`}>
+            <p className="text-sm text-on-surface truncate">
+              {user?.display_name || user?.username}
+            </p>
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={handleLogout}
+          className={`mt-3 w-full flex items-center gap-3 text-sm text-on-surface-variant hover:text-red-400 transition-colors ${isCollapsed ? 'md:justify-center' : ''}`}
+          title="Выйти"
+        >
+          <span className="material-symbols-outlined icon-thin">logout</span>
+          <span className={isCollapsed ? 'md:hidden' : ''}>Выйти</span>
+        </button>
+      </div>
     </nav>
   )
 }

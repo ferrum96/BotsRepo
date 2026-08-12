@@ -13,15 +13,22 @@ import httpx
 from fastapi import Depends, FastAPI, HTTPException, Request, Security, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
-from fastapi.security import APIKeyHeader
 from starlette.status import HTTP_401_UNAUTHORIZED
 
 from telegram import Bot
 
 from bot.config import Config
-from bot.database import Database, Member, get_member_join_date
+from bot.database import DashboardUser, Database, Member, get_member_join_date
 from bot.group_titles import assign_game_nick_tag, remove_from_group_header
 from dashboard.backend import schemas
+from dashboard.backend.auth import (
+    DashboardUserOut,
+    _verify_password,
+    api_key_header,
+    create_token,
+    require_auth_user,
+    verify_dashboard_token_or_api_key,
+)
 from dashboard.backend.events import EventHub
 
 logger = logging.getLogger(__name__)
@@ -32,16 +39,13 @@ FRONTEND_DIST = BASE_DIR / "dashboard" / "frontend" / "dist"
 config = Config.from_env()
 SURVEY_RETRY_BLACKLIST_REASONS = {"survey_attempts_exhausted", "survey_failed"}
 
-api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
-
-
-async def _verify_api_key(request: Request, api_key: Optional[str] = Security(api_key_header)) -> None:
-    """Require API key for mutating endpoints and for serving the SPA in production."""
-    if not config.dashboard_api_key:
-        return
-    if request.method == "GET":
-        return
+async def _verify_api_key(api_key: Optional[str] = Security(api_key_header)) -> None:
+    """Require API key for internal bot → API event push."""
     expected = config.dashboard_api_key
+    if not expected:
+        raise HTTPException(
+            status_code=HTTP_401_UNAUTHORIZED, detail="API key not configured"
+        )
     if (
         isinstance(api_key, str)
         and len(api_key) == len(expected)
@@ -181,24 +185,52 @@ async def _fetch_tg_username_for_blacklist(user_id: int) -> str | None:
     return user.get("username")
 
 
+def _to_user_out(user: DashboardUser) -> DashboardUserOut:
+    return DashboardUserOut(
+        id=user.id, username=user.username, display_name=user.display_name
+    )
+
+
 @app.get("/health", response_model=schemas.HealthOut)
 async def health():
     return {"status": "ok"}
 
 
+@app.post("/api/auth/login", response_model=schemas.LoginOut)
+async def login(body: schemas.LoginIn, db: Database = Depends(get_db)):
+    username = body.username.strip()
+    if not username or not body.password:
+        raise HTTPException(status_code=400, detail="Укажите логин и пароль")
+
+    user = await db.get_dashboard_user_by_username(username)
+    if user is None or not _verify_password(body.password, user.password_hash):
+        raise HTTPException(
+            status_code=HTTP_401_UNAUTHORIZED, detail="Неверный логин или пароль"
+        )
+
+    token = create_token(_to_user_out(user))
+    return {"token": token, "user": _to_user_out(user)}
+
+
+@app.get("/api/auth/me", response_model=schemas.MeOut)
+async def me(
+    user: DashboardUserOut = Depends(require_auth_user),
+    db: Database = Depends(get_db),
+):
+    existing = await db.get_dashboard_user_by_id(user.id)
+    if existing is None:
+        raise HTTPException(
+            status_code=HTTP_401_UNAUTHORIZED, detail="Invalid or missing token"
+        )
+    return {"user": user}
+
+
 @app.websocket("/ws")
 async def dashboard_ws(websocket: WebSocket):
-    """Live updates for the SPA. Optional ?token= matches DASHBOARD_API_KEY when set."""
-    if config.dashboard_api_key:
-        token = websocket.query_params.get("token", "")
-        expected = config.dashboard_api_key
-        if not (
-            isinstance(token, str)
-            and len(token) == len(expected)
-            and secrets.compare_digest(token, expected)
-        ):
-            await websocket.close(code=1008)
-            return
+    """Live updates for the SPA. Accept API key or JWT token via ?token=."""
+    if not await verify_dashboard_token_or_api_key(websocket):
+        await websocket.close(code=1008)
+        return
 
     hub = _event_hub()
     await hub.connect(websocket)
@@ -229,7 +261,7 @@ async def publish_internal_event(
 @app.get("/api/members", response_model=list[schemas.MemberOut])
 async def list_members(
     db: Database = Depends(get_db),
-    _: None = Security(_verify_api_key),
+    _user: DashboardUserOut = Depends(require_auth_user),
 ):
     members = await db.get_active_members()
     group_ids = await db.get_group_member_ids()
@@ -241,7 +273,7 @@ async def list_members(
 @app.get("/api/blacklist", response_model=list[schemas.BlacklistOut])
 async def list_blacklist(
     db: Database = Depends(get_db),
-    _: None = Security(_verify_api_key),
+    _user: DashboardUserOut = Depends(require_auth_user),
 ):
     rows = await db.get_blacklist()
     result: list[schemas.BlacklistOut] = []
@@ -270,7 +302,7 @@ async def list_blacklist(
 @app.get("/api/inactive-members", response_model=list[schemas.InactiveMemberOut])
 async def list_inactive_members(
     db: Database = Depends(get_db),
-    _: None = Security(_verify_api_key),
+    _user: DashboardUserOut = Depends(require_auth_user),
 ):
     members = await db.get_inactive_members()
     group_ids = await db.get_group_member_ids()
@@ -292,7 +324,7 @@ async def list_inactive_members(
 @app.get("/api/stats", response_model=schemas.StatsOut)
 async def get_stats(
     db: Database = Depends(get_db),
-    _: None = Security(_verify_api_key),
+    _user: DashboardUserOut = Depends(require_auth_user),
 ):
     all_members = await db.get_all_members()
     blacklist = await db.get_blacklist()
@@ -309,7 +341,7 @@ async def update_member(
     user_id: int,
     body: schemas.MemberUpdate,
     db: Database = Depends(get_db),
-    _: None = Security(_verify_api_key),
+    _user: DashboardUserOut = Depends(require_auth_user),
 ):
     member = await db.get_member(user_id)
     if not member:
@@ -361,7 +393,7 @@ async def update_member(
 async def kick_member(
     user_id: int,
     db: Database = Depends(get_db),
-    _: None = Security(_verify_api_key),
+    _user: DashboardUserOut = Depends(require_auth_user),
 ):
     member = await db.get_member(user_id)
     if not member:
@@ -452,7 +484,7 @@ async def kick_member(
 async def unblock_blacklist_member(
     user_id: int,
     db: Database = Depends(get_db),
-    _: None = Security(_verify_api_key),
+    _user: DashboardUserOut = Depends(require_auth_user),
 ):
     blacklist_rows = await db.get_blacklist()
     entry = next((row for row in blacklist_rows if row[0] == user_id), None)
@@ -548,10 +580,7 @@ if FRONTEND_DIST.exists():
     app.mount("/assets", StaticFiles(directory=FRONTEND_DIST / "assets"), name="assets")
 
     @app.get("/{path:path}")
-    async def serve_spa(
-        path: str,
-        _: None = Security(_verify_api_key),
-    ):
+    async def serve_spa(path: str):
         index = FRONTEND_DIST / "index.html"
         if index.exists():
             return FileResponse(index)

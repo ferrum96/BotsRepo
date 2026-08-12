@@ -4,7 +4,19 @@ import time
 import httpx
 from fastapi.testclient import TestClient
 
-from tests.conftest import PROD_GROUP_SIZE_CAP, seed_member_sync
+from tests.conftest import PROD_GROUP_SIZE_CAP, seed_dashboard_user_sync, seed_member_sync
+
+
+def _auth_headers(api_module, db_path) -> dict[str, str]:
+    user_id = seed_dashboard_user_sync(db_path)
+    import dashboard.backend.auth as auth_module
+
+    token = auth_module.create_token(
+        auth_module.DashboardUserOut(
+            id=user_id, username="admin", display_name="Load Admin"
+        )
+    )
+    return {"Authorization": f"Bearer {token}"}
 
 
 def test_api_health_load(api_module):
@@ -21,13 +33,14 @@ def test_api_health_load(api_module):
 
 
 def test_api_members_list_load(api_module, db_path):
+    headers = _auth_headers(api_module, db_path)
     with TestClient(api_module.app) as client:
         seed_member_sync(db_path, 1, track_in_group=True)
         seed_member_sync(db_path, 2, track_in_group=True)
         seed_member_sync(db_path, 3, track_in_group=True)
 
         start = time.perf_counter()
-        responses = [client.get("/api/members") for _ in range(100)]
+        responses = [client.get("/api/members", headers=headers) for _ in range(100)]
         elapsed = time.perf_counter() - start
 
     ok_count = sum(1 for r in responses if r.status_code == 200)
@@ -37,6 +50,7 @@ def test_api_members_list_load(api_module, db_path):
 
 def test_api_members_list_prod_size_payload(api_module, db_path):
     """Repeated reads of a full ~100-member roster stay fast enough."""
+    headers = _auth_headers(api_module, db_path)
     with TestClient(api_module.app) as client:
         for i in range(1, PROD_GROUP_SIZE_CAP + 1):
             seed_member_sync(
@@ -47,7 +61,7 @@ def test_api_members_list_prod_size_payload(api_module, db_path):
             )
 
         start = time.perf_counter()
-        responses = [client.get("/api/members") for _ in range(20)]
+        responses = [client.get("/api/members", headers=headers) for _ in range(20)]
         elapsed = time.perf_counter() - start
 
     assert all(r.status_code == 200 for r in responses)

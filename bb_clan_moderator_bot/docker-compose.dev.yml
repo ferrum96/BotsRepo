@@ -20,7 +20,6 @@ services:
       - NODE_ENV=development
       - VITE_DEV_PORT=5174
       - DEV_API_TARGET=http://pubg-api:8080
-      - VITE_DASHBOARD_API_KEY=${DASHBOARD_API_KEY}
 
   pubg-api:
     build:

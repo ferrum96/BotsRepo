@@ -1,6 +1,7 @@
 import { useEffect } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 
+import { getToken } from '../api/client'
 import {
   BLACKLIST_KEY,
   INACTIVE_KEY,
@@ -9,10 +10,10 @@ import {
 } from '../utils/queryKeys'
 
 const API_BASE = import.meta.env.VITE_API_URL || ''
-const API_KEY = import.meta.env.VITE_DASHBOARD_API_KEY || ''
 
 function buildWsUrl(): string {
-  const tokenQS = API_KEY ? `?token=${encodeURIComponent(API_KEY)}` : ''
+  const token = getToken()
+  const tokenQS = token ? `?token=${encodeURIComponent(token)}` : ''
   if (API_BASE) {
     const url = new URL(API_BASE)
     url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'

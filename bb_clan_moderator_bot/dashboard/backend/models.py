@@ -64,6 +64,16 @@ class GroupMemberORM(Base):
     joined_at = Column(String, nullable=False, default=lambda: _now_utc().isoformat())
 
 
+class DashboardUserORM(Base):
+    __tablename__ = "dashboard_users"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    username = Column(String, nullable=False, unique=True)
+    password_hash = Column(String, nullable=False)
+    display_name = Column(String, nullable=False)
+    created_at = Column(String, nullable=False, default=lambda: _now_utc().isoformat())
+
+
 def get_db_url(config: Optional[Config] = None) -> str:
     if config is None:
         config = Config.from_env()

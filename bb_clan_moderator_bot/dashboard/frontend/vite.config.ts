@@ -41,7 +41,6 @@ export default defineConfig({
     css: false,
     env: {
       VITE_API_URL: '',
-      VITE_DASHBOARD_API_KEY: 'test-dashboard-secret',
     },
   },
 })

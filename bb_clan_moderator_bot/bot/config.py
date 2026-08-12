@@ -43,6 +43,7 @@ class Config:
     max_survey_attempts: int = 2
     dashboard_port: int = 8080
     dashboard_api_key: str = ""
+    dashboard_jwt_secret: str = ""
     dashboard_events_url: str = ""
     group_sync_interval_minutes: int = 10
     # Telethon (my.telegram.org) — required to list all group participants.
@@ -75,6 +76,7 @@ class Config:
             max_survey_attempts=int(os.getenv("MAX_SURVEY_ATTEMPTS", "2")),
             dashboard_port=int(os.getenv("DASHBOARD_PORT", "8080")),
             dashboard_api_key=os.getenv("DASHBOARD_API_KEY", ""),
+            dashboard_jwt_secret=os.getenv("DASHBOARD_JWT_SECRET", ""),
             dashboard_events_url=os.getenv("DASHBOARD_EVENTS_URL", "").rstrip("/"),
             group_sync_interval_minutes=int(
                 os.getenv("GROUP_SYNC_INTERVAL_MINUTES", "10")

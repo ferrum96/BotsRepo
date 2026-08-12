@@ -40,6 +40,15 @@ class SurveyProgress:
     attempts: int = 0
 
 
+@dataclass
+class DashboardUser:
+    id: int
+    username: str
+    password_hash: str
+    display_name: str
+    created_at: str
+
+
 class Database:
     def __init__(self, path: str) -> None:
         self.path = path
@@ -90,6 +99,14 @@ class Database:
             CREATE TABLE IF NOT EXISTS group_members (
                 user_id INTEGER PRIMARY KEY,
                 joined_at TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS dashboard_users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT NOT NULL UNIQUE,
+                password_hash TEXT NOT NULL,
+                display_name TEXT NOT NULL,
+                created_at TEXT NOT NULL
             );
             """
         )
@@ -551,6 +568,58 @@ class Database:
         row = await cursor.fetchone()
         return row["joined_at"] if row else None
 
+    async def get_dashboard_user_by_username(self, username: str) -> Optional[DashboardUser]:
+        db = await self.connect()
+        cursor = await db.execute(
+            "SELECT * FROM dashboard_users WHERE username = ?", (username,)
+        )
+        row = await cursor.fetchone()
+        if not row:
+            return None
+        return _row_to_dashboard_user(row)
+
+    async def get_dashboard_user_by_id(self, user_id: int) -> Optional[DashboardUser]:
+        db = await self.connect()
+        cursor = await db.execute(
+            "SELECT * FROM dashboard_users WHERE id = ?", (user_id,)
+        )
+        row = await cursor.fetchone()
+        if not row:
+            return None
+        return _row_to_dashboard_user(row)
+
+    async def create_dashboard_user(
+        self, username: str, password_hash: str, display_name: str
+    ) -> DashboardUser:
+        now = datetime.now(timezone.utc).isoformat()
+        db = await self.connect()
+        cursor = await db.execute(
+            """
+            INSERT INTO dashboard_users (username, password_hash, display_name, created_at)
+            VALUES (?, ?, ?, ?)
+            """,
+            (username, password_hash, display_name, now),
+        )
+        await db.commit()
+        user = await self.get_dashboard_user_by_id(cursor.lastrowid)
+        assert user is not None
+        return user
+
+    async def update_dashboard_user(
+        self,
+        user_id: int,
+        *,
+        password_hash: str,
+        display_name: str,
+    ) -> bool:
+        db = await self.connect()
+        cursor = await db.execute(
+            "UPDATE dashboard_users SET password_hash = ?, display_name = ? WHERE id = ?",
+            (password_hash, display_name, user_id),
+        )
+        await db.commit()
+        return cursor.rowcount > 0
+
 
 async def get_member_join_date(db: Database, member: Member) -> str:
     """Return the actual join date, registration date, or legacy placeholder."""
@@ -590,4 +659,14 @@ def _row_to_progress(row: aiosqlite.Row) -> SurveyProgress:
         discord_nick=row["discord_nick"],
         perspective=row["perspective"],
         attempts=row["attempts"],
+    )
+
+
+def _row_to_dashboard_user(row: aiosqlite.Row) -> DashboardUser:
+    return DashboardUser(
+        id=row["id"],
+        username=row["username"],
+        password_hash=row["password_hash"],
+        display_name=row["display_name"],
+        created_at=row["created_at"],
     )

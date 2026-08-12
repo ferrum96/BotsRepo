@@ -21,6 +21,7 @@ def test_config_from_env_reads_required_and_optional(monkeypatch):
     monkeypatch.setenv("MAX_SURVEY_ATTEMPTS", "3")
     monkeypatch.setenv("DASHBOARD_PORT", "9090")
     monkeypatch.setenv("DASHBOARD_API_KEY", "secret")
+    monkeypatch.setenv("DASHBOARD_JWT_SECRET", "jwt-secret")
     monkeypatch.setenv("GROUP_SYNC_INTERVAL_MINUTES", "15")
 
     cfg = Config.from_env()
@@ -37,6 +38,7 @@ def test_config_from_env_reads_required_and_optional(monkeypatch):
     assert cfg.max_survey_attempts == 3
     assert cfg.dashboard_port == 9090
     assert cfg.dashboard_api_key == "secret"
+    assert cfg.dashboard_jwt_secret == "jwt-secret"
     assert cfg.group_sync_interval_minutes == 15
 
 
@@ -67,6 +69,7 @@ def test_config_defaults_when_optional_env_missing(monkeypatch):
     monkeypatch.delenv("ADMIN_CONTACT_USERNAME", raising=False)
     monkeypatch.delenv("MAX_SURVEY_ATTEMPTS", raising=False)
     monkeypatch.delenv("DASHBOARD_API_KEY", raising=False)
+    monkeypatch.delenv("DASHBOARD_JWT_SECRET", raising=False)
     monkeypatch.delenv("DATABASE_PATH", raising=False)
 
     cfg = Config.from_env()
@@ -74,6 +77,7 @@ def test_config_defaults_when_optional_env_missing(monkeypatch):
     assert cfg.admin_contacts == []
     assert cfg.max_survey_attempts == 2
     assert cfg.dashboard_api_key == ""
+    assert cfg.dashboard_jwt_secret == ""
     assert cfg.database_path == "data/bot.db"
 
 
