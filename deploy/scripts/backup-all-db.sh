@@ -4,7 +4,7 @@ set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 ENV_FILE="${REPO_DIR}/deploy/backup.env"
-BACKUP_SCRIPT="${SCRIPT_DIR}/backup-sqlite-to-cloud.sh"
+BACKUP_SCRIPT="${SCRIPT_DIR}/backup-sqlite-to-b2.sh"
 
 if [ -f "$ENV_FILE" ]; then
   set -a

@@ -3,6 +3,7 @@
 
 import argparse
 import os
+import re
 import sys
 from datetime import datetime, timedelta, timezone
 
@@ -10,9 +11,16 @@ import boto3
 from botocore.config import Config
 
 
+def _region_from_endpoint(endpoint: str) -> str:
+    match = re.search(r"s3\.([^.]+)\.backblazeb2\.com", endpoint)
+    return match.group(1) if match else "us-east-001"
+
+
 def get_client(endpoint: str, key_id: str, app_key: str):
+    region = _region_from_endpoint(endpoint)
     return boto3.client(
         "s3",
+        region_name=region,
         endpoint_url=endpoint,
         aws_access_key_id=key_id,
         aws_secret_access_key=app_key,

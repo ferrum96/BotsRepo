@@ -4,6 +4,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 ENV_FILE="${REPO_DIR}/deploy/backup.env"
+UPLOADER="${REPO_DIR}/deploy/scripts/b2-upload.py"
 
 JOB_NAME="${1:-}"
 if [ -z "$JOB_NAME" ]; then
@@ -30,8 +31,6 @@ DEFAULT_B2_BUCKET=""
 DEFAULT_B2_KEY_ID=""
 DEFAULT_B2_APP_KEY=""
 DEFAULT_B2_ENDPOINT=""
-DEFAULT_GDRIVE_SERVICE_ACCOUNT=""
-DEFAULT_GDRIVE_FOLDER_ID=""
 
 if [ -f "$ENV_FILE" ]; then
   set -a
@@ -44,8 +43,6 @@ if [ -f "$ENV_FILE" ]; then
   DEFAULT_B2_KEY_ID="${BACKUP_B2_KEY_ID:-}"
   DEFAULT_B2_APP_KEY="${BACKUP_B2_APP_KEY:-}"
   DEFAULT_B2_ENDPOINT="${BACKUP_B2_ENDPOINT:-}"
-  DEFAULT_GDRIVE_SERVICE_ACCOUNT="${BACKUP_GDRIVE_SERVICE_ACCOUNT:-}"
-  DEFAULT_GDRIVE_FOLDER_ID="${BACKUP_GDRIVE_FOLDER_ID:-}"
 fi
 
 ENABLED="$(get_env "${PREFIX}ENABLED" "false")"
@@ -53,15 +50,10 @@ DB_PATH="$(get_env "${PREFIX}DB_PATH" "")"
 LOCAL_DIR="$(get_env "${PREFIX}LOCAL_DIR" "/var/backups/${JOB_NAME}")"
 RETENTION_DAYS="$(get_env "${PREFIX}RETENTION_DAYS" "${DEFAULT_RETENTION_DAYS}")"
 
-# Backblaze B2
 B2_BUCKET="$(get_env "${PREFIX}B2_BUCKET" "${DEFAULT_B2_BUCKET}")"
 B2_KEY_ID="$(get_env "${PREFIX}B2_KEY_ID" "${DEFAULT_B2_KEY_ID}")"
 B2_APP_KEY="$(get_env "${PREFIX}B2_APP_KEY" "${DEFAULT_B2_APP_KEY}")"
 B2_ENDPOINT="$(get_env "${PREFIX}B2_ENDPOINT" "${DEFAULT_B2_ENDPOINT}")"
-
-# Google Drive
-GDRIVE_FOLDER_ID="$(get_env "${PREFIX}GDRIVE_FOLDER_ID" "${DEFAULT_GDRIVE_FOLDER_ID}")"
-GDRIVE_SERVICE_ACCOUNT="$(get_env "${PREFIX}GDRIVE_SERVICE_ACCOUNT" "${DEFAULT_GDRIVE_SERVICE_ACCOUNT}")"
 
 if [ "$ENABLED" != "true" ]; then
   echo "${JOB_NAME} backup skipped: ${PREFIX}ENABLED != true"
@@ -73,13 +65,9 @@ if [ -z "$DB_PATH" ]; then
   exit 1
 fi
 
-if [ -z "$B2_BUCKET" ] && [ -z "$GDRIVE_FOLDER_ID" ]; then
-  echo "ERROR: set either ${PREFIX}B2_BUCKET or ${PREFIX}GDRIVE_FOLDER_ID in ${ENV_FILE}"
+if [ -z "$B2_BUCKET" ] || [ -z "$B2_KEY_ID" ] || [ -z "$B2_APP_KEY" ] || [ -z "$B2_ENDPOINT" ]; then
+  echo "ERROR: ${PREFIX}B2_BUCKET, ${PREFIX}B2_KEY_ID, ${PREFIX}B2_APP_KEY and ${PREFIX}B2_ENDPOINT must be set in ${ENV_FILE}"
   exit 1
-fi
-
-if [ -n "$B2_BUCKET" ] && [ -n "$GDRIVE_FOLDER_ID" ]; then
-  echo "WARNING: both B2 and Google Drive configured for ${JOB_NAME}; using B2"
 fi
 
 if [ ! -f "$DB_PATH" ]; then
@@ -89,6 +77,11 @@ fi
 
 if ! command -v sqlite3 >/dev/null 2>&1; then
   echo "ERROR: sqlite3 CLI not found"
+  exit 1
+fi
+
+if [ ! -f "$UPLOADER" ]; then
+  echo "ERROR: B2 uploader not found: ${UPLOADER}"
   exit 1
 fi
 
@@ -105,44 +98,13 @@ sqlite3 "$DB_PATH" ".backup '${DUMP_PATH}'"
 tar -czf "$ARCHIVE_PATH" -C "$LOCAL_DIR" "$DUMP_NAME"
 rm -f "$DUMP_PATH"
 
-if [ -n "$B2_BUCKET" ]; then
-  UPLOADER="${REPO_DIR}/deploy/scripts/b2-upload.py"
-  if [ ! -f "$UPLOADER" ]; then
-    echo "ERROR: B2 uploader not found: ${UPLOADER}"
-    exit 1
-  fi
-
-  if [ -z "$B2_KEY_ID" ] || [ -z "$B2_APP_KEY" ] || [ -z "$B2_ENDPOINT" ]; then
-    echo "ERROR: ${PREFIX}B2_KEY_ID, ${PREFIX}B2_APP_KEY and ${PREFIX}B2_ENDPOINT must be set"
-    exit 1
-  fi
-
-  python3 "$UPLOADER" \
-    --file "$ARCHIVE_PATH" \
-    --bucket "$B2_BUCKET" \
-    --key-id "$B2_KEY_ID" \
-    --app-key "$B2_APP_KEY" \
-    --endpoint "$B2_ENDPOINT" \
-    --retention-days "$RETENTION_DAYS" \
-    --prefix "${JOB_NAME}-db-"
-else
-  UPLOADER="${REPO_DIR}/deploy/scripts/gdrive-upload.py"
-  if [ ! -f "$UPLOADER" ]; then
-    echo "ERROR: Google Drive uploader not found: ${UPLOADER}"
-    exit 1
-  fi
-
-  if [ -z "$GDRIVE_SERVICE_ACCOUNT" ]; then
-    echo "ERROR: ${PREFIX}GDRIVE_SERVICE_ACCOUNT must be set"
-    exit 1
-  fi
-
-  python3 "$UPLOADER" \
-    --file "$ARCHIVE_PATH" \
-    --folder-id "$GDRIVE_FOLDER_ID" \
-    --credentials "$GDRIVE_SERVICE_ACCOUNT" \
-    --retention-days "$RETENTION_DAYS" \
-    --prefix "${JOB_NAME}-db-"
-fi
+python3 "$UPLOADER" \
+  --file "$ARCHIVE_PATH" \
+  --bucket "$B2_BUCKET" \
+  --key-id "$B2_KEY_ID" \
+  --app-key "$B2_APP_KEY" \
+  --endpoint "$B2_ENDPOINT" \
+  --retention-days "$RETENTION_DAYS" \
+  --prefix "${JOB_NAME}-db-"
 
 find "$LOCAL_DIR" -type f -name "${JOB_NAME}-db-*.tar.gz" -mtime "+${RETENTION_DAYS}" -delete
