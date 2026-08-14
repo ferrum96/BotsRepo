@@ -77,3 +77,6 @@ deploy/webhook.env
 deploy/backup.env
 deploy/backup.json
 deploy/secrets/
+
+# Local scratch
+tmp/
