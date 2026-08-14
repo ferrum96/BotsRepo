@@ -132,11 +132,9 @@ async def import_all_chat_participants(
                     tg_username=getattr(user, "username", None),
                     tg_first_name=getattr(user, "first_name", None),
                     game_nick=guessed,
-                    real_name=(
-                        f"{getattr(user, 'first_name', '') or ''} "
-                        f"{getattr(user, 'last_name', '') or ''}"
-                    ).strip()
-                    or guessed,
+                    # Imported without survey — admins fill the real name in
+                    # the dashboard; Telegram username is shown instead.
+                    real_name="",
                     discord_nick=None,
                     perspective="",
                 )

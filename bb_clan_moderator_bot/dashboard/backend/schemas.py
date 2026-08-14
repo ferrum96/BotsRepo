@@ -22,18 +22,24 @@ class MemberOut(BaseModel):
 
 class MemberUpdate(BaseModel):
     game_nick: str = Field(..., min_length=1, max_length=64)
-    real_name: str = Field(..., min_length=1, max_length=64)
+    # Empty string = not filled in yet (imported without survey).
+    real_name: str = Field("", max_length=64)
     discord_nick: Optional[str] = Field(None, max_length=64)
     # Empty string = unknown (imported without survey).
     perspective: Literal["FPP", "TPP", "Mixed", ""] = ""
 
-    @field_validator("game_nick", "real_name")
+    @field_validator("game_nick")
     @classmethod
     def strip_required(cls, value: str) -> str:
         cleaned = (value or "").strip()
         if not cleaned:
             raise ValueError("must not be empty")
         return cleaned
+
+    @field_validator("real_name")
+    @classmethod
+    def strip_real_name(cls, value: str) -> str:
+        return (value or "").strip()
 
     @field_validator("discord_nick")
     @classmethod

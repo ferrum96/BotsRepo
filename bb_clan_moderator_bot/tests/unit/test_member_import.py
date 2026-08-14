@@ -84,6 +84,9 @@ async def test_import_all_creates_members_and_skips_bots(db, config: Config):
     assert member is not None
     assert member.game_nick == "alice"
     assert member.perspective == ""
+    # Real name stays empty until an admin fills it in the dashboard.
+    assert member.real_name == ""
+    assert member.tg_username == "alice"
 
 
 @pytest.mark.asyncio

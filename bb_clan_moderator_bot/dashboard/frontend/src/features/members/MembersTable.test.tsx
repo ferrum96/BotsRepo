@@ -60,6 +60,18 @@ describe('MembersTable', () => {
     expect(screen.queryByText('Fireman')).not.toBeInTheDocument()
   })
 
+  it('shows the Telegram first name and a dash for an empty name', () => {
+    const withoutName: Member[] = [{ ...members[0], real_name: '' }]
+
+    render(
+      <MembersTable members={withoutName} search="" onEdit={vi.fn()} onKick={vi.fn()} />,
+    )
+
+    expect(screen.getByText('Имя в TG')).toBeInTheDocument()
+    expect(screen.getByText('Ivan')).toBeInTheDocument()
+    expect(screen.getAllByText('—').length).toBeGreaterThan(0)
+  })
+
   it('calls onKick for the selected member', async () => {
     const user = userEvent.setup()
     const onKick = vi.fn()

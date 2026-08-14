@@ -42,6 +42,9 @@ _soft_kick_user_ids: set[int] = set()
 # After leave/kick, skip survey backfill briefly (Telegram status can lag).
 _recently_left_user_ids: dict[int, float] = {}
 _RECENT_LEAVE_GRACE_SEC = 120.0
+# chat_member + service message can both report one join; notify admins once.
+_recently_notified_join_ids: dict[int, float] = {}
+_JOIN_NOTICE_GRACE_SEC = 300.0
 
 
 def _mark_recently_left(user_id: int) -> None:
@@ -138,6 +141,10 @@ async def sync_group_members_state(
             if _is_recently_left(progress.user_id):
                 continue
             if not progress.game_nick or not progress.real_name:
+                continue
+            # Blacklisted players keep completed progress for a later unblock,
+            # but must never be re-imported as clan members while banned.
+            if await db.is_blacklisted(progress.user_id):
                 continue
             try:
                 chat_member = await bot.get_chat_member(
@@ -269,7 +276,7 @@ def _format_member_line(member) -> str:
     )
     discord = html.escape(member.discord_nick or "—")
     game_nick = html.escape(member.game_nick)
-    real_name = html.escape(member.real_name)
+    real_name = html.escape(member.real_name or "—")
     perspective = html.escape(member.perspective)
     return (
         f"• <b>{game_nick}</b> — {real_name}\n"
@@ -492,6 +499,50 @@ async def _apply_default_member_permissions(
         return False
 
 
+def _should_notify_join(user_id: int) -> bool:
+    notified_at = _recently_notified_join_ids.get(user_id)
+    now = time.monotonic()
+    if notified_at is not None and now - notified_at <= _JOIN_NOTICE_GRACE_SEC:
+        return False
+    _recently_notified_join_ids[user_id] = now
+    return True
+
+
+async def _notify_admins_about_new_member(
+    bot: Bot,
+    config: "Config",
+    user,
+    member,
+) -> None:
+    """DM every ADMIN_IDS entry when a vetted player enters the group."""
+    if not config.admin_ids or config.is_admin(user.id):
+        return
+    if not _should_notify_join(user.id):
+        return
+
+    lines = ["Новый участник в группе:", f"Telegram ID: {user.id}"]
+    username = getattr(user, "username", None) or (
+        member.tg_username if member else None
+    )
+    if username:
+        lines.append(f"TG: @{username}")
+    lines.append(f"Имя: {member.real_name if member else '—'}")
+    lines.append(f"Ник в игре: {member.game_nick if member else '—'}")
+    lines.append(f"Discord: {(member.discord_nick if member else None) or '—'}")
+    lines.append(f"Режим: {(member.perspective if member else None) or '—'}")
+    text = "\n".join(lines)
+
+    for admin_id in config.admin_ids:
+        try:
+            await bot.send_message(chat_id=admin_id, text=text)
+        except (BadRequest, Forbidden, TelegramError):
+            logger.warning(
+                "Failed to notify admin %s about new member %s",
+                admin_id,
+                user.id,
+            )
+
+
 async def _handle_vetted_group_join(
     bot: Bot,
     config: "Config",
@@ -514,6 +565,7 @@ async def _handle_vetted_group_join(
     await _apply_default_member_permissions(bot, config, user.id)
 
     member = await db.get_member(user.id)
+    await _notify_admins_about_new_member(bot, config, user, member)
     if member and member.game_nick and not config.is_admin(user.id):
         await assign_game_nick_tag(bot, config.group_id, user.id, member.game_nick)
         await check_activity_on_join(bot, db, config, member)
@@ -648,27 +700,36 @@ async def cmd_unblacklist(
     db = _get_db(context)
     config = _get_config(context)
     removed = await db.remove_from_blacklist(user_id)
+    # Always unban: a leftover Telegram ban keeps the player in "Removed users"
+    # and blocks invite links even when the blacklist row is already gone.
+    unbanned = True
+    try:
+        await context.bot.unban_chat_member(
+            config.group_id,
+            user_id,
+            only_if_banned=True,
+        )
+    except (BadRequest, Forbidden, TelegramError):
+        unbanned = False
+        logger.exception("Failed to unban user %s after /unblacklist", user_id)
+
     if update.message:
         if removed:
-            try:
-                await context.bot.unban_chat_member(
-                    config.group_id,
-                    user_id,
-                    only_if_banned=True,
-                )
-            except (BadRequest, Forbidden, TelegramError):
-                logger.exception(
-                    "Failed to unban user %s after /unblacklist",
-                    user_id,
-                )
-            await update.message.reply_text(
+            text = (
                 f"Пользователь {user_id} удалён из чёрного списка "
                 f"(Telegram-бан снят, если был)."
             )
-        else:
-            await update.message.reply_text(
-                f"Пользователь {user_id} не найден в чёрном списке."
+        elif unbanned:
+            text = (
+                f"Пользователя {user_id} не было в чёрном списке; "
+                f"Telegram-бан снят, если был."
             )
+        else:
+            text = (
+                f"Пользователь {user_id} не найден в чёрном списке, "
+                f"снять Telegram-бан не удалось."
+            )
+        await update.message.reply_text(text)
 
 
 async def cmd_kick_non_members(

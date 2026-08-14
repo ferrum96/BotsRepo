@@ -23,7 +23,7 @@ function reasonLabel(reason: string): string {
     return 'Не прошел опрос'
   }
   if (reason === 'kicked_from_dashboard' || reason === 'removed_from_group') {
-    return 'Забанен админом' // legacy reasons
+    return 'Забанен админом'
   }
   if (reason === 'not_in_clan_kicked') {
     return 'Не из базы клана'

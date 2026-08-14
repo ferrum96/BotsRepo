@@ -32,7 +32,15 @@ export function MembersTable({
 
   const filtered = useMemo(() => {
     return members.filter(
-      (m) => matchesTextQuery(search, m.game_nick, m.real_name, m.discord_nick, m.tg_username)
+      (m) =>
+        matchesTextQuery(
+          search,
+          m.game_nick,
+          m.real_name,
+          m.discord_nick,
+          m.tg_username,
+          m.tg_first_name
+        )
     )
   }, [members, search])
 
@@ -49,13 +57,24 @@ export function MembersTable({
       ),
     },
     {
+      key: 'tg_first_name',
+      header: 'Имя в TG',
+      headerClassName: 'hidden sm:table-cell',
+      cellClassName: 'hidden sm:table-cell',
+      cell: (row) => (
+        <span className="inline-block max-w-[140px] truncate text-center text-on-surface-variant md:max-w-none">
+          {row.tg_first_name || '—'}
+        </span>
+      ),
+    },
+    {
       key: 'real_name',
       header: 'Имя',
       headerClassName: 'hidden sm:table-cell',
       cellClassName: 'hidden sm:table-cell',
       cell: (row) => (
         <span className="inline-block max-w-[140px] truncate text-center md:max-w-none">
-          {row.real_name}
+          {row.real_name || '—'}
         </span>
       ),
     },

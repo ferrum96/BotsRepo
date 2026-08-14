@@ -18,7 +18,13 @@ from starlette.status import HTTP_401_UNAUTHORIZED
 from telegram import Bot
 
 from bot.config import Config
-from bot.database import DashboardUser, Database, Member, get_member_join_date
+from bot.database import (
+    DashboardUser,
+    Database,
+    Member,
+    SurveyProgress,
+    get_member_join_date,
+)
 from bot.group_titles import assign_game_nick_tag, remove_from_group_header
 from dashboard.backend import schemas
 from dashboard.backend.auth import (
@@ -279,8 +285,11 @@ async def list_blacklist(
     result: list[schemas.BlacklistOut] = []
     for uid, reason, created_at in rows:
         member = await db.get_member(uid)
+        # Kicked players lose their `members` row; the survey snapshot kept for
+        # a later unblock still holds their profile.
+        profile = member or await db.get_progress(uid)
         tg_username = member.tg_username if member else None
-        if not tg_username and reason in SURVEY_RETRY_BLACKLIST_REASONS:
+        if not tg_username:
             try:
                 tg_username = await _fetch_tg_username_for_blacklist(uid)
             except Exception:
@@ -289,9 +298,9 @@ async def list_blacklist(
             schemas.BlacklistOut(
                 user_id=uid,
                 tg_username=tg_username,
-                game_nick=member.game_nick if member else None,
-                real_name=member.real_name if member else None,
-                discord_nick=member.discord_nick if member else None,
+                game_nick=profile.game_nick if profile else None,
+                real_name=profile.real_name if profile else None,
+                discord_nick=profile.discord_nick if profile else None,
                 reason=reason,
                 created_at=created_at,
             )
@@ -389,6 +398,43 @@ async def update_member(
     return result
 
 
+async def _notify_admins_dashboard_kick(
+    client: httpx.AsyncClient,
+    *,
+    user_id: int,
+    member: Member,
+) -> None:
+    """DM every ADMIN_IDS entry about a dashboard hard-kick."""
+    if not config.admin_ids:
+        return
+    lines = [
+        "Участник удалён из группы через дашборд и добавлен в чёрный список.",
+        f"Telegram ID: {user_id}",
+    ]
+    if member.tg_username:
+        lines.append(f"TG: @{member.tg_username}")
+    if member.tg_first_name:
+        lines.append(f"Имя TG: {member.tg_first_name}")
+    lines.append(f"Имя: {member.real_name}")
+    lines.append(f"Ник в игре: {member.game_nick}")
+    lines.append(f"Discord: {member.discord_nick or '—'}")
+    text = "\n".join(lines)
+    for admin_id in config.admin_ids:
+        resp = await client.post(
+            f"https://api.telegram.org/bot{config.bot_token}/sendMessage",
+            json={"chat_id": admin_id, "text": text},
+            timeout=15,
+        )
+        data = resp.json()
+        if resp.status_code != 200 or not data.get("ok"):
+            logger.warning(
+                "Failed to notify admin %s about dashboard kick of %s: %s",
+                admin_id,
+                user_id,
+                data.get("description", resp.text),
+            )
+
+
 @app.post("/api/members/{user_id}/kick")
 async def kick_member(
     user_id: int,
@@ -428,47 +474,39 @@ async def kick_member(
                         "Проверьте, что бот может назначать администраторов."
                     ),
                 )
-        elif tg_status in {"left", "kicked", "banned"}:
-            # Already out of the group — only drop clan DB row.
-            await db.delete_member(user_id)
-            await _broadcast(
-                {
-                    "type": "dashboard.refresh",
-                    "reason": "kick",
-                    "user_id": user_id,
-                }
-            )
-            return {"ok": True}
 
-        # Soft kick (ban+unban): remove from group but allow return after survey.
-        ban_resp = await client.post(
-            f"https://api.telegram.org/bot{config.bot_token}/banChatMember",
-            json={"chat_id": config.group_id, "user_id": user_id},
-            timeout=15,
-        )
-        if ban_resp.status_code != 200 or not ban_resp.json().get("ok"):
-            detail = ban_resp.json().get("description", ban_resp.text)
-            logger.error("Failed to kick user %s: %s", user_id, detail)
-            raise HTTPException(
-                status_code=502, detail=f"Telegram API error: {detail}"
+        # Hard ban blocks invite rejoins until dashboard unblock /unblacklist.
+        if tg_status not in {"kicked", "banned"}:
+            ban_resp = await client.post(
+                f"https://api.telegram.org/bot{config.bot_token}/banChatMember",
+                json={"chat_id": config.group_id, "user_id": user_id},
+                timeout=15,
             )
-        unban_resp = await client.post(
-            f"https://api.telegram.org/bot{config.bot_token}/unbanChatMember",
-            json={
-                "chat_id": config.group_id,
-                "user_id": user_id,
-                "only_if_banned": True,
-            },
-            timeout=15,
-        )
-        if unban_resp.status_code != 200 or not unban_resp.json().get("ok"):
-            detail = unban_resp.json().get("description", unban_resp.text)
-            logger.error("Failed to unban user %s after kick: %s", user_id, detail)
-            raise HTTPException(
-                status_code=502, detail=f"Telegram API error: {detail}"
-            )
+            ban_data = ban_resp.json()
+            if ban_resp.status_code != 200 or not ban_data.get("ok"):
+                detail = ban_data.get("description", ban_resp.text)
+                logger.error("Failed to hard-ban user %s: %s", user_id, detail)
+                raise HTTPException(
+                    status_code=502, detail=f"Telegram API error: {detail}"
+                )
+
+        await _notify_admins_dashboard_kick(client, user_id=user_id, member=member)
 
     await db.delete_member(user_id)
+    await db.add_to_blacklist(user_id, "kicked_from_dashboard")
+    # add_to_blacklist wipes survey progress; re-store the completed survey so
+    # unblocking lets the player return by invite link without retaking it.
+    await db.set_progress(
+        SurveyProgress(
+            user_id=user_id,
+            step="completed",
+            game_nick=member.game_nick,
+            real_name=member.real_name,
+            discord_nick=member.discord_nick,
+            perspective=member.perspective or None,
+            attempts=0,
+        )
+    )
     await _broadcast(
         {
             "type": "dashboard.refresh",
@@ -508,6 +546,7 @@ async def unblock_blacklist_member(
             raise HTTPException(
                 status_code=502, detail=f"Telegram API error: {detail}"
             )
+        logger.info("Telegram ban lifted for user %s during unblock", user_id)
 
     removed = await db.remove_from_blacklist(user_id)
     if not removed:

@@ -108,17 +108,41 @@ def test_kick_member_happy_path(api_client, auth_headers, db_path, telegram_tran
     assert response.status_code == 200
     assert response.json() == {"ok": True}
 
-    assert api_client.get("/api/blacklist", headers=auth_headers).json() == []
+    blacklist = api_client.get("/api/blacklist", headers=auth_headers).json()
+    assert len(blacklist) == 1
+    assert blacklist[0]["user_id"] == 1001
+    assert blacklist[0]["reason"] == "kicked_from_dashboard"
     members = api_client.get("/api/members", headers=auth_headers).json()
     assert all(row["user_id"] != 1001 for row in members)
 
-    # Soft kick: ban then unban so invite rejoin is possible after survey.
+    # Hard ban + admin DM; no soft-kick unban.
     paths = [path for _method, path in telegram_transport.calls]
     assert any(path.endswith("/banChatMember") for path in paths)
-    assert any(path.endswith("/unbanChatMember") for path in paths)
+    assert any(path.endswith("/sendMessage") for path in paths)
+    assert not any(path.endswith("/unbanChatMember") for path in paths)
 
 
-def test_kick_already_left_member_only_deletes_db(
+def test_kicked_member_keeps_profile_in_blacklist(api_client, auth_headers, db_path):
+    """Member row is gone after kick — blacklist must show the survey snapshot."""
+    seed_member_sync(
+        db_path,
+        1001,
+        game_nick="ClanFox",
+        real_name="Alex",
+        discord_nick="fox#1",
+        track_in_group=True,
+    )
+
+    assert api_client.post("/api/members/1001/kick", headers=auth_headers).status_code == 200
+
+    entry = api_client.get("/api/blacklist", headers=auth_headers).json()[0]
+    assert entry["game_nick"] == "ClanFox"
+    assert entry["real_name"] == "Alex"
+    assert entry["discord_nick"] == "fox#1"
+    assert entry["tg_username"] == "ivan_tg"
+
+
+def test_kick_already_left_member_bans_and_blacklists(
     api_client, auth_headers, db_path, telegram_transport
 ):
     seed_member_sync(db_path, 1002, track_in_group=True)
@@ -129,8 +153,12 @@ def test_kick_already_left_member_only_deletes_db(
     assert response.json() == {"ok": True}
 
     paths = [path for _method, path in telegram_transport.calls]
-    assert not any(path.endswith("/banChatMember") for path in paths)
-    assert api_client.get("/api/blacklist", headers=auth_headers).json() == []
+    assert any(path.endswith("/banChatMember") for path in paths)
+    assert any(path.endswith("/sendMessage") for path in paths)
+    blacklist = api_client.get("/api/blacklist", headers=auth_headers).json()
+    assert len(blacklist) == 1
+    assert blacklist[0]["user_id"] == 1002
+    assert blacklist[0]["reason"] == "kicked_from_dashboard"
     assert all(
         row["user_id"] != 1002 for row in api_client.get("/api/members", headers=auth_headers).json()
     )
@@ -208,6 +236,29 @@ def test_update_member_without_nick_change_skips_tag(
     assert response.status_code == 200
     assert response.json()["perspective"] == "Mixed"
     assign.assert_not_awaited()
+
+
+def test_update_member_allows_empty_real_name(api_client, auth_headers, db_path, monkeypatch):
+    """Imported members start without a name — saving an empty one is valid."""
+    seed_member_sync(db_path, 1001, game_nick="Nick", real_name="", track_in_group=True)
+    from unittest.mock import AsyncMock
+
+    monkeypatch.setattr(
+        "dashboard.backend.main.assign_game_nick_tag", AsyncMock(return_value=True)
+    )
+
+    response = api_client.patch(
+        "/api/members/1001",
+        headers=auth_headers,
+        json={
+            "game_nick": "Nick",
+            "real_name": "   ",
+            "discord_nick": None,
+            "perspective": "",
+        },
+    )
+    assert response.status_code == 200
+    assert response.json()["real_name"] == ""
 
 
 def test_update_member_rejects_invalid_perspective(api_client, auth_headers, db_path):

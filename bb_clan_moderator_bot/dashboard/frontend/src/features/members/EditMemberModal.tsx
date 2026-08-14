@@ -40,14 +40,13 @@ export function EditMemberModal({
   const handleSubmit = (event: FormEvent) => {
     event.preventDefault()
     const nick = gameNick.trim()
-    const name = realName.trim()
-    if (!nick || !name) {
-      setError('Ник и имя обязательны')
+    if (!nick) {
+      setError('Ник в игре обязателен')
       return
     }
     onSave({
       game_nick: nick,
-      real_name: name,
+      real_name: realName.trim(),
       discord_nick: discordNick.trim() || null,
       perspective,
     })
@@ -72,7 +71,7 @@ export function EditMemberModal({
               onChange={(e) => setRealName(e.target.value)}
               disabled={isSaving}
               maxLength={64}
-              required
+              placeholder="необязательно"
             />
           </label>
           <label className="block">

@@ -6,13 +6,16 @@ from telegram.constants import ChatMemberStatus
 from bot.config import Config
 from bot.database import Database, SurveyProgress
 from bot.handlers.admin import (
+    _handle_vetted_group_join,
     _mark_recently_left,
     _may_enter_group,
     _promote_from_completed_survey,
     _recently_left_user_ids,
+    _recently_notified_join_ids,
     _reject_unauthorized_join,
     _soft_kick_user_ids,
     ban_user_in_group,
+    cmd_unblacklist,
     enforce_blacklist_telegram_bans,
     on_chat_join_request,
     on_chat_member_update,
@@ -57,6 +60,14 @@ def _member_update(
     chat_member.new_chat_member = new_cm
     update = MagicMock()
     update.chat_member = chat_member
+    return update
+
+
+def _admin_command_update(user_id: int = 42):
+    update = MagicMock()
+    update.effective_user = _User(user_id)
+    update.message = MagicMock()
+    update.message.reply_text = AsyncMock()
     return update
 
 
@@ -248,7 +259,7 @@ async def test_handle_join_assigns_member_tag(
 
     monkeypatch.setattr(db, "is_member", _is_member)
 
-    bot = MagicMock()
+    bot = AsyncMock()
     await _handle_vetted_group_join(bot, config, db, user)
 
     reject.assert_not_called()
@@ -586,6 +597,123 @@ async def test_member_tag_from_real_ptb_cyrillic():
         None,
     )
     assert _member_tag_from_chat_member(cm) == "AlcoSafпарк"
+
+
+async def test_unblacklist_unbans_even_without_blacklist_row(db: Database, mock_context):
+    """Leftover Telegram ban keeps the player in 'Removed users' — always lift it."""
+    mock_context.args = ["472"]
+
+    await cmd_unblacklist(_admin_command_update(), mock_context)
+
+    assert await db.is_blacklisted(472) is False
+    mock_context.bot.unban_chat_member.assert_awaited_once_with(
+        GROUP_ID,
+        472,
+        only_if_banned=True,
+    )
+
+
+async def test_kicked_player_may_return_after_unblock(db: Database, config: Config):
+    """Dashboard kick keeps the completed survey; unblock restores entry."""
+    await seed_member(db, 470, track_in_group=True)
+    await db.delete_member(470)
+    await db.add_to_blacklist(470, "kicked_from_dashboard")
+    await db.set_progress(
+        SurveyProgress(
+            user_id=470,
+            step="completed",
+            game_nick="PlayerOne",
+            real_name="Ivan",
+            perspective="FPP",
+        )
+    )
+
+    assert await _may_enter_group(db, config, 470) is False
+
+    await db.remove_from_blacklist(470)
+    assert await _may_enter_group(db, config, 470) is True
+
+
+async def test_sync_skips_blacklisted_completed_survey(
+    db: Database, config: Config, monkeypatch
+):
+    """Blacklisted players keep progress for unblock but stay out of members."""
+    await db.set_progress(
+        SurveyProgress(
+            user_id=471,
+            step="completed",
+            game_nick="Nick",
+            real_name="Name",
+            perspective="FPP",
+        )
+    )
+    await db.add_to_blacklist(471, "kicked_from_dashboard")
+    await db.set_progress(
+        SurveyProgress(
+            user_id=471,
+            step="completed",
+            game_nick="Nick",
+            real_name="Name",
+            perspective="FPP",
+        )
+    )
+
+    bot = AsyncMock()
+    await sync_group_members_state(bot, db, config)
+
+    bot.get_chat_member.assert_not_awaited()
+    assert await db.is_member(471) is False
+
+
+async def test_group_join_notifies_admins(db: Database, config: Config, monkeypatch):
+    await seed_member(db, 460, game_nick="Fox", real_name="Alex", track_in_group=False)
+    _recently_notified_join_ids.pop(460, None)
+    monkeypatch.setattr(
+        "bot.handlers.admin.assign_game_nick_tag", AsyncMock(return_value=True)
+    )
+    monkeypatch.setattr("bot.handlers.admin.check_activity_on_join", AsyncMock())
+
+    bot = AsyncMock()
+    await _handle_vetted_group_join(bot, config, db, _User(460, "fox_tg", "Alex"))
+
+    assert bot.send_message.await_count == len(config.admin_ids)
+    text = bot.send_message.await_args.kwargs["text"]
+    assert "Новый участник" in text
+    assert "Fox" in text
+    assert "@fox_tg" in text
+    _recently_notified_join_ids.pop(460, None)
+
+
+async def test_group_join_notifies_admins_once(db: Database, config: Config, monkeypatch):
+    """chat_member and service-message handlers both report the same join."""
+    await seed_member(db, 461, track_in_group=False)
+    _recently_notified_join_ids.pop(461, None)
+    monkeypatch.setattr(
+        "bot.handlers.admin.assign_game_nick_tag", AsyncMock(return_value=True)
+    )
+    monkeypatch.setattr("bot.handlers.admin.check_activity_on_join", AsyncMock())
+
+    bot = AsyncMock()
+    user = _User(461)
+    await _handle_vetted_group_join(bot, config, db, user)
+    await _handle_vetted_group_join(bot, config, db, user)
+
+    assert bot.send_message.await_count == len(config.admin_ids)
+    _recently_notified_join_ids.pop(461, None)
+
+
+async def test_group_join_skips_notice_for_config_admin(
+    db: Database, config: Config, monkeypatch
+):
+    admin_id = config.admin_ids[0]
+    await seed_member(db, admin_id, track_in_group=False)
+    _recently_notified_join_ids.pop(admin_id, None)
+    monkeypatch.setattr("bot.handlers.admin.check_activity_on_join", AsyncMock())
+
+    bot = AsyncMock()
+    await _handle_vetted_group_join(bot, config, db, _User(admin_id))
+
+    bot.send_message.assert_not_awaited()
 
 
 async def test_matching_member_tag_does_not_rewrite_long_nick(

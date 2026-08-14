@@ -5,7 +5,7 @@ import sqlite3
 from tests.conftest import seed_blacklist_sync, seed_member_sync
 
 
-def test_e2e_member_kick_deletes_without_blacklist(api_client, auth_headers, db_path):
+def test_e2e_member_kick_blacklists_and_removes(api_client, auth_headers, db_path):
     seed_member_sync(
         db_path,
         1001,
@@ -30,11 +30,50 @@ def test_e2e_member_kick_deletes_without_blacklist(api_client, auth_headers, db_
     members_after_kick = api_client.get("/api/members", headers=auth_headers).json()
     assert all(m["user_id"] != 1001 for m in members_after_kick)
 
-    assert api_client.get("/api/blacklist", headers=auth_headers).json() == []
+    blacklist = api_client.get("/api/blacklist", headers=auth_headers).json()
+    assert len(blacklist) == 1
+    assert blacklist[0]["user_id"] == 1001
+    assert blacklist[0]["reason"] == "kicked_from_dashboard"
 
     stats_mid = api_client.get("/api/stats", headers=auth_headers).json()
     assert stats_mid["total_members"] == 0
-    assert stats_mid["total_blacklist"] == 0
+    assert stats_mid["total_blacklist"] == 1
+
+
+def test_e2e_kicked_player_can_return_after_unblock(api_client, auth_headers, db_path):
+    """Kick keeps the completed survey so unblock + invite link works again."""
+    seed_member_sync(
+        db_path,
+        1001,
+        game_nick="ClanFox",
+        real_name="Alex",
+        discord_nick="fox#1",
+        perspective="FPP",
+        track_in_group=True,
+    )
+
+    assert api_client.post("/api/members/1001/kick", headers=auth_headers).status_code == 200
+
+    with sqlite3.connect(db_path) as conn:
+        progress = conn.execute(
+            "SELECT step, game_nick, real_name FROM survey_progress WHERE user_id = 1001"
+        ).fetchone()
+    assert progress == ("completed", "ClanFox", "Alex")
+
+    unblock = api_client.post("/api/blacklist/1001/unblock", headers=auth_headers)
+    assert unblock.status_code == 200
+    assert unblock.json().get("requires_survey") is not True
+
+    # Survey stays completed after unblock — join gate lets the player back in.
+    with sqlite3.connect(db_path) as conn:
+        step = conn.execute(
+            "SELECT step FROM survey_progress WHERE user_id = 1001"
+        ).fetchone()
+        blacklisted = conn.execute(
+            "SELECT 1 FROM blacklist WHERE user_id = 1001"
+        ).fetchone()
+    assert step == ("completed",)
+    assert blacklisted is None
 
 
 def test_e2e_survey_failure_unblock_requires_survey(api_client, auth_headers, db_path):
@@ -86,6 +125,6 @@ def test_e2e_kick_persists_in_sqlite(api_client, auth_headers, db_path):
             "SELECT 1 FROM group_members WHERE user_id = 1001"
         ).fetchone()
 
-    assert bl is None
+    assert bl == ("kicked_from_dashboard",)
     assert member is None
     assert gm is None
