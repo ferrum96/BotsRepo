@@ -85,6 +85,11 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     db = _get_db(context)
     config = _get_config(context)
 
+    if config.is_admin(user.id):
+        await db.clear_progress(user.id)
+        await update.message.reply_text(msg.ADMIN_NO_SURVEY)
+        return ConversationHandler.END
+
     if await db.is_blacklisted(user.id):
         await update.message.reply_text(
             msg.BLACKLISTED,

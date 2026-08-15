@@ -177,6 +177,17 @@ async def test_start_begins_survey_without_contacts(mock_context, db: Database):
     assert message.reply_text.await_args_list[0].kwargs.get("reply_markup") is None
 
 
+async def test_start_skips_survey_for_admin(mock_context, db: Database, config: Config):
+    admin_id = config.admin_ids[0]
+    update, message = _make_update(admin_id)
+
+    state = await start(update, mock_context)
+    assert state == ConversationHandler.END
+    assert await db.get_progress(admin_id) is None
+    assert _reply_texts(message) == [msg.ADMIN_NO_SURVEY]
+    assert message.reply_text.await_count == 1
+
+
 async def test_cmd_contacts_with_admins(mock_context, config: Config):
     _with_contacts(mock_context, config)
     update, message = _make_update(508)
