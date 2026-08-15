@@ -21,7 +21,7 @@ from telegram.ext import (
     filters,
 )
 
-from bot.activity_monitor import refresh_group_activity
+from bot.activity_monitor import ACTIVITY_REFRESH_INTERVAL_HOURS, refresh_group_activity
 from bot.config import Config
 from bot.database import Database
 from bot.events import publish_dashboard_event
@@ -108,7 +108,12 @@ async def post_init(application: Application) -> None:
         ban_result["errors"],
     )
 
-    activity_result = await refresh_group_activity(application.bot, db, config)
+    activity_result = await refresh_group_activity(
+        application.bot,
+        db,
+        config,
+        force_refresh=True,
+    )
     logger.info(
         "Initial activity refresh: group_total=%s checked=%s inactive=%s added=%s "
         "skipped_join_grace=%s errors=%s",
@@ -132,14 +137,17 @@ async def post_init(application: Application) -> None:
             "Scheduled group sync every %s minutes",
             config.group_sync_interval_minutes,
         )
-        day_interval_sec = 24 * 60 * 60
+        activity_interval_sec = max(60, ACTIVITY_REFRESH_INTERVAL_HOURS * 60 * 60)
         application.job_queue.run_repeating(
             _refresh_activity_job,
-            interval=day_interval_sec,
-            first=day_interval_sec,
+            interval=activity_interval_sec,
+            first=activity_interval_sec,
             name="refresh_group_activity",
         )
-        logger.info("Scheduled inactivity refresh every 24 hours")
+        logger.info(
+            "Scheduled inactivity refresh every %s hour(s)",
+            ACTIVITY_REFRESH_INTERVAL_HOURS,
+        )
 
 
 async def _sync_group_job(context) -> None:

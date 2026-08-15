@@ -10,10 +10,14 @@ import pytest
 from bot.activity_monitor import (
     INACTIVE_AFTER_HOURS,
     JOIN_ACTIVITY_GRACE_HOURS,
+    OP_GG_MATCHES_RECENT_URL,
+    OP_GG_RENEW_URL,
+    _first_match_started_at,
     _is_inactive,
     _is_within_join_grace,
     _parse_join_datetime,
     _parse_last_match_from_html,
+    _parse_opgg_user_id,
     check_activity_on_join,
     fetch_last_match_at,
     refresh_member_activity,
@@ -64,6 +68,39 @@ def test_parse_last_match_returns_none_when_missing():
     assert _parse_last_match_from_html("<html>no match</html>") is None
 
 
+def test_parse_opgg_user_id_from_profile():
+    html = (
+        '<div id="userNickname" data-user_nickname="shroud" '
+        'data-user_id="59fe237a6e6f210001da80f9" class="player-summary__name">'
+        "shroud</div>"
+    )
+    assert _parse_opgg_user_id(html) == "59fe237a6e6f210001da80f9"
+
+
+def test_parse_opgg_user_id_missing():
+    assert _parse_opgg_user_id("<html>no id</html>") is None
+
+
+def test_first_match_started_at_from_items():
+    payload = {
+        "matches": {
+            "items": [
+                {"started_at": "2026-07-05T10:00:00Z"},
+                {"started_at": "2026-07-04T10:00:00Z"},
+            ]
+        }
+    }
+    parsed = _first_match_started_at(payload)
+    assert parsed == datetime(2026, 7, 5, 10, 0, tzinfo=timezone.utc)
+
+
+def test_first_match_started_at_compact_offset():
+    parsed = _first_match_started_at(
+        {"data": {"matches": {"items": [{"started_at": "2026-07-05T10:00:00+0000"}]}}}
+    )
+    assert parsed == datetime(2026, 7, 5, 10, 0, tzinfo=timezone.utc)
+
+
 def test_is_inactive_threshold():
     now = datetime(2026, 7, 12, tzinfo=timezone.utc)
     assert _is_inactive(now - timedelta(hours=INACTIVE_AFTER_HOURS), now) is True
@@ -110,6 +147,112 @@ async def test_fetch_last_match_at_uses_opgg():
     url = client.get.await_args.args[0]
     assert "op.gg" in url
     assert "TestNick" in url
+    client.post.assert_not_called()
+
+
+class _FakeResponse:
+    def __init__(self, text="", json_data=None, status_code=200):
+        self.text = text
+        self.status_code = status_code
+        self._json = json_data if json_data is not None else {}
+
+    def raise_for_status(self):
+        if self.status_code >= 400:
+            raise AssertionError(f"unexpected HTTP {self.status_code}")
+
+    def json(self):
+        return self._json
+
+
+@pytest.mark.asyncio
+async def test_fetch_last_match_at_renews_then_reads_api():
+    html = (
+        '<div id="userNickname" data-user_nickname="TestNick" '
+        'data-user_id="59fe237a6e6f210001da80f9"></div>'
+    )
+    opgg_user_id = "59fe237a6e6f210001da80f9"
+    client = AsyncMock()
+
+    async def fake_get(url, **kwargs):
+        if "/matches/recent" in url:
+            return _FakeResponse(
+                json_data={
+                    "matches": {
+                        "items": [{"started_at": "2026-07-05T10:00:00Z"}]
+                    }
+                }
+            )
+        if "/renew-status" in url:
+            return _FakeResponse(json_data={"data": {"is_ended": True}})
+        return _FakeResponse(text=html)
+
+    async def fake_post(url, **kwargs):
+        assert url == OP_GG_RENEW_URL.format(opgg_user_id=opgg_user_id)
+        assert kwargs["json"] == {"_method": "PATCH", "type": "matches"}
+        return _FakeResponse(json_data={"data": {"is_ended": True}})
+
+    client.get = AsyncMock(side_effect=fake_get)
+    client.post = AsyncMock(side_effect=fake_post)
+
+    result = await fetch_last_match_at("TestNick", client)
+    assert result == datetime(2026, 7, 5, 10, 0, tzinfo=timezone.utc)
+    client.post.assert_awaited_once()
+    requested = [call.args[0] for call in client.get.await_args_list]
+    assert any(OP_GG_MATCHES_RECENT_URL.format(opgg_user_id=opgg_user_id) == u for u in requested)
+
+
+@pytest.mark.asyncio
+async def test_refresh_skips_when_checked_within_hour():
+    db = AsyncMock()
+    db.set_member_inactive = AsyncMock(return_value=True)
+    client = MagicMock()
+    client.get = AsyncMock()
+
+    now = datetime(2026, 7, 12, 12, 0, tzinfo=timezone.utc)
+    checked = (now - timedelta(minutes=20)).strftime("%Y-%m-%d %H:%M:%S")
+    joined = (now - timedelta(hours=JOIN_ACTIVITY_GRACE_HOURS + 1)).isoformat()
+
+    result = await refresh_member_activity(
+        db=db,
+        member=_member(last_match_checked_at=checked),
+        client=client,
+        now_utc=now,
+        joined_at=joined,
+    )
+
+    assert result["checked"] is False
+    client.get.assert_not_called()
+    db.set_member_inactive.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_refresh_force_ignores_hour_cooldown(monkeypatch):
+    db = AsyncMock()
+    db.set_member_inactive = AsyncMock(return_value=True)
+    db.set_member_last_match = AsyncMock(return_value=True)
+    client = MagicMock()
+
+    now = datetime(2026, 7, 12, 12, 0, tzinfo=timezone.utc)
+    checked = (now - timedelta(minutes=10)).strftime("%Y-%m-%d %H:%M:%S")
+    joined = (now - timedelta(hours=JOIN_ACTIVITY_GRACE_HOURS + 1)).isoformat()
+    recent_match = now - timedelta(hours=10)
+
+    async def _fake_fetch(game_nick, client):
+        return recent_match
+
+    monkeypatch.setattr("bot.activity_monitor.fetch_last_match_at", _fake_fetch)
+
+    result = await refresh_member_activity(
+        db=db,
+        member=_member(last_match_checked_at=checked),
+        client=client,
+        now_utc=now,
+        joined_at=joined,
+        force_refresh=True,
+    )
+
+    assert result["checked"] is True
+    db.set_member_inactive.assert_awaited_once_with(1001, False)
 
 
 @pytest.mark.asyncio
