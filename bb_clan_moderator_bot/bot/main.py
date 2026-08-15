@@ -124,6 +124,14 @@ async def post_init(application: Application) -> None:
         activity_result["skipped_join_grace"],
         activity_result["errors"],
     )
+    await publish_dashboard_event(
+        config,
+        {
+            "type": "inactive.changed",
+            "reason": "activity_refresh_startup",
+            "added": activity_result["added_to_inactive"],
+        },
+    )
 
     if application.job_queue:
         interval_sec = max(60, config.group_sync_interval_minutes * 60)
