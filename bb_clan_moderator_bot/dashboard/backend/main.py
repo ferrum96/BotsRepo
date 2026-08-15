@@ -408,8 +408,7 @@ async def _notify_admins_dashboard_kick(
     if not config.admin_ids:
         return
     lines = [
-        "Участник удалён из группы через дашборд и добавлен в чёрный список.",
-        f"Telegram ID: {user_id}",
+        "Участник удалён из группы и добавлен в чёрный список.",
     ]
     if member.tg_username:
         lines.append(f"TG: @{member.tg_username}")

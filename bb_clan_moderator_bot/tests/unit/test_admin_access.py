@@ -12,6 +12,7 @@ from bot.handlers.admin import (
     _promote_from_completed_survey,
     _recently_left_user_ids,
     _recently_notified_join_ids,
+    _recently_notified_leave_ids,
     _reject_unauthorized_join,
     _soft_kick_user_ids,
     ban_user_in_group,
@@ -19,6 +20,7 @@ from bot.handlers.admin import (
     enforce_blacklist_telegram_bans,
     on_chat_join_request,
     on_chat_member_update,
+    on_group_membership_message_event,
     sync_group_members_state,
 )
 from tests.conftest import GROUP_ID, seed_member
@@ -40,6 +42,7 @@ def _member_update(
     chat_id: int = GROUP_ID,
     old_tag: Optional[str] = None,
     new_tag: Optional[str] = None,
+    actor_id: Optional[int] = None,
 ):
     user = _User(user_id)
     old_cm = MagicMock()
@@ -58,6 +61,7 @@ def _member_update(
     chat_member.chat.id = chat_id
     chat_member.old_chat_member = old_cm
     chat_member.new_chat_member = new_cm
+    chat_member.from_user = _User(actor_id if actor_id is not None else user_id)
     update = MagicMock()
     update.chat_member = chat_member
     return update
@@ -98,8 +102,9 @@ async def test_may_enter_group_allows_completed_survey(db: Database, config: Con
     assert await _may_enter_group(db, config, 88) is True
 
 
-async def test_may_enter_group_denies_stranger(db: Database, config: Config):
-    assert await _may_enter_group(db, config, 999) is False
+async def test_may_enter_group_allows_invite_joiner(db: Database, config: Config):
+    """Admin-shared invite: no survey, still allowed (imported on join)."""
+    assert await _may_enter_group(db, config, 999) is True
 
 
 async def test_promote_from_completed_survey(db: Database):
@@ -421,6 +426,114 @@ async def test_sync_skips_survey_backfill_for_recently_left(
     assert await db.is_member(413) is False
 
 
+async def test_handle_join_imports_invite_joiner_without_survey(
+    db: Database, config: Config, monkeypatch
+):
+    user = _User(304, "newguy", "Pete")
+    monkeypatch.setattr(
+        "bot.handlers.admin.assign_game_nick_tag", AsyncMock(return_value=True)
+    )
+    monkeypatch.setattr("bot.handlers.admin.check_activity_on_join", AsyncMock())
+    monkeypatch.setattr(
+        "bot.handlers.admin._apply_default_member_permissions",
+        AsyncMock(return_value=True),
+    )
+    reject = AsyncMock()
+    monkeypatch.setattr("bot.handlers.admin._reject_unauthorized_join", reject)
+
+    bot = AsyncMock()
+    await _handle_vetted_group_join(bot, config, db, user)
+
+    reject.assert_not_called()
+    member = await db.get_member(304)
+    assert member is not None
+    assert member.game_nick == "newguy"
+    assert member.real_name == ""
+    assert member.perspective == ""
+    assert member.tg_username == "newguy"
+    assert 304 in await db.get_group_member_ids()
+
+
+async def test_handle_join_prefers_completed_survey_over_invite_import(
+    db: Database, config: Config, monkeypatch
+):
+    await db.set_progress(
+        SurveyProgress(
+            user_id=305,
+            step="completed",
+            game_nick="SurveyNick",
+            real_name="Ivan",
+            discord_nick="ivan#1",
+            perspective="FPP",
+        )
+    )
+    monkeypatch.setattr(
+        "bot.handlers.admin.assign_game_nick_tag", AsyncMock(return_value=True)
+    )
+    monkeypatch.setattr("bot.handlers.admin.check_activity_on_join", AsyncMock())
+    monkeypatch.setattr(
+        "bot.handlers.admin._apply_default_member_permissions",
+        AsyncMock(return_value=True),
+    )
+
+    bot = AsyncMock()
+    await _handle_vetted_group_join(bot, config, db, _User(305, "tguser", "Pete"))
+
+    member = await db.get_member(305)
+    assert member is not None
+    assert member.game_nick == "SurveyNick"
+    assert member.real_name == "Ivan"
+    assert member.perspective == "FPP"
+    assert await db.get_progress(305) is None
+
+
+async def test_join_request_invite_joiner_approved_and_imported(
+    db: Database, mock_context, monkeypatch
+):
+    monkeypatch.setattr(
+        "bot.handlers.admin.sync_group_members_state",
+        AsyncMock(
+            return_value={
+                "total": 0,
+                "present": 0,
+                "missing": 0,
+                "blacklisted": 0,
+                "errors": 0,
+            }
+        ),
+    )
+    monkeypatch.setattr(
+        "bot.handlers.admin.assign_game_nick_tag", AsyncMock(return_value=True)
+    )
+    monkeypatch.setattr("bot.handlers.admin.check_activity_on_join", AsyncMock())
+    monkeypatch.setattr(
+        "bot.handlers.admin._apply_default_member_permissions",
+        AsyncMock(return_value=True),
+    )
+
+    user = _User(441, username="invited", first_name="Inv")
+    req = MagicMock()
+    req.chat.id = GROUP_ID
+    req.from_user = user
+    update = MagicMock()
+    update.chat_join_request = req
+    mock_context.bot.approve_chat_join_request = AsyncMock()
+    mock_context.bot.decline_chat_join_request = AsyncMock()
+
+    await on_chat_join_request(update, mock_context)
+
+    mock_context.bot.decline_chat_join_request.assert_not_awaited()
+    mock_context.bot.approve_chat_join_request.assert_awaited_once_with(
+        chat_id=GROUP_ID,
+        user_id=441,
+    )
+    member = await db.get_member(441)
+    assert member is not None
+    assert member.game_nick == "invited"
+    assert member.real_name == ""
+    assert 441 in await db.get_group_member_ids()
+
+
 async def test_join_request_blacklisted_declines_and_bans(
     db: Database, mock_context, monkeypatch
 ):
@@ -489,9 +602,30 @@ async def test_enforce_blacklist_skips_admins(db: Database, config: Config, monk
     ban.assert_not_called()
 
 
-async def test_unauthorized_join_event_rejects(
+async def test_invite_join_imports_member_without_survey(
     db: Database, mock_context, monkeypatch
 ):
+    """Join via admin invite link: save clan row, do not kick."""
+    monkeypatch.setattr(
+        "bot.handlers.admin.sync_group_members_state",
+        AsyncMock(
+            return_value={
+                "total": 0,
+                "present": 0,
+                "missing": 0,
+                "blacklisted": 0,
+                "errors": 0,
+            }
+        ),
+    )
+    monkeypatch.setattr(
+        "bot.handlers.admin.assign_game_nick_tag", AsyncMock(return_value=True)
+    )
+    monkeypatch.setattr("bot.handlers.admin.check_activity_on_join", AsyncMock())
+    monkeypatch.setattr(
+        "bot.handlers.admin._apply_default_member_permissions",
+        AsyncMock(return_value=True),
+    )
     reject = AsyncMock()
     monkeypatch.setattr("bot.handlers.admin._reject_unauthorized_join", reject)
 
@@ -502,8 +636,32 @@ async def test_unauthorized_join_event_rejects(
     )
     await on_chat_member_update(update, mock_context)
 
+    reject.assert_not_awaited()
+    member = await db.get_member(440)
+    assert member is not None
+    assert member.game_nick == "u"
+    assert member.real_name == ""
+    assert member.perspective == ""
+    assert 440 in await db.get_group_member_ids()
+
+
+async def test_blacklisted_join_event_still_rejects(
+    db: Database, mock_context, monkeypatch
+):
+    await db.add_to_blacklist(442, "survey_failed")
+    reject = AsyncMock()
+    monkeypatch.setattr("bot.handlers.admin._reject_unauthorized_join", reject)
+
+    update = _member_update(
+        user_id=442,
+        old_status=ChatMemberStatus.LEFT,
+        new_status=ChatMemberStatus.MEMBER,
+    )
+    await on_chat_member_update(update, mock_context)
+
     reject.assert_awaited_once()
-    assert reject.await_args.args[3] == 440
+    assert reject.await_args.args[3] == 442
+    assert await db.is_member(442) is False
 
 
 async def test_manual_member_tag_change_updates_game_nick(
@@ -714,6 +872,158 @@ async def test_group_join_skips_notice_for_config_admin(
     await _handle_vetted_group_join(bot, config, db, _User(admin_id))
 
     bot.send_message.assert_not_awaited()
+
+
+def _left_message_update(*, user_id: int, actor_id: int, chat_id: int = GROUP_ID):
+    left = _User(user_id)
+    update = MagicMock()
+    update.effective_chat = MagicMock()
+    update.effective_chat.id = chat_id
+    update.message = MagicMock()
+    update.message.left_chat_member = left
+    update.message.from_user = _User(actor_id)
+    update.message.new_chat_members = []
+    return update
+
+
+_SYNC_EMPTY = {
+    "total": 0,
+    "present": 0,
+    "missing": 0,
+    "blacklisted": 0,
+    "errors": 0,
+}
+
+
+async def test_voluntary_leave_notifies_admins(
+    db: Database, mock_context, config: Config, monkeypatch
+):
+    await seed_member(
+        db, 480, game_nick="Fox", real_name="Alex", track_in_group=True
+    )
+    _recently_notified_leave_ids.pop(480, None)
+    monkeypatch.setattr(
+        "bot.handlers.admin.sync_group_members_state",
+        AsyncMock(return_value=_SYNC_EMPTY),
+    )
+
+    update = _member_update(
+        user_id=480,
+        old_status=ChatMemberStatus.MEMBER,
+        new_status=ChatMemberStatus.LEFT,
+        actor_id=480,
+    )
+    update.chat_member.new_chat_member.user = _User(480, "fox_tg", "Alex")
+    await on_chat_member_update(update, mock_context)
+
+    bot = mock_context.bot
+    assert bot.send_message.await_count == len(config.admin_ids)
+    text = bot.send_message.await_args.kwargs["text"]
+    assert "Участник вышел из группы" in text
+    assert "Fox" in text
+    assert "Alex" in text
+    assert "@fox_tg" in text
+    _recently_notified_leave_ids.pop(480, None)
+
+
+async def test_voluntary_leave_notifies_admins_once(
+    db: Database, mock_context, config: Config, monkeypatch
+):
+    await seed_member(db, 481, track_in_group=True)
+    _recently_notified_leave_ids.pop(481, None)
+    monkeypatch.setattr(
+        "bot.handlers.admin.sync_group_members_state",
+        AsyncMock(return_value=_SYNC_EMPTY),
+    )
+
+    await on_chat_member_update(
+        _member_update(
+            user_id=481,
+            old_status=ChatMemberStatus.MEMBER,
+            new_status=ChatMemberStatus.LEFT,
+            actor_id=481,
+        ),
+        mock_context,
+    )
+    await on_group_membership_message_event(
+        _left_message_update(user_id=481, actor_id=481),
+        mock_context,
+    )
+
+    assert mock_context.bot.send_message.await_count == len(config.admin_ids)
+    _recently_notified_leave_ids.pop(481, None)
+
+
+async def test_admin_remove_without_ban_does_not_notify_leave(
+    db: Database, mock_context, monkeypatch
+):
+    await seed_member(db, 482, track_in_group=True)
+    _recently_notified_leave_ids.pop(482, None)
+    monkeypatch.setattr(
+        "bot.handlers.admin.sync_group_members_state",
+        AsyncMock(return_value=_SYNC_EMPTY),
+    )
+
+    await on_chat_member_update(
+        _member_update(
+            user_id=482,
+            old_status=ChatMemberStatus.MEMBER,
+            new_status=ChatMemberStatus.LEFT,
+            actor_id=42,
+        ),
+        mock_context,
+    )
+
+    mock_context.bot.send_message.assert_not_awaited()
+    _recently_notified_leave_ids.pop(482, None)
+
+
+async def test_admin_ban_does_not_notify_leave(
+    db: Database, mock_context, monkeypatch
+):
+    await seed_member(db, 483, track_in_group=True)
+    _recently_notified_leave_ids.pop(483, None)
+    monkeypatch.setattr(
+        "bot.handlers.admin.sync_group_members_state",
+        AsyncMock(return_value=_SYNC_EMPTY),
+    )
+
+    await on_chat_member_update(
+        _member_update(
+            user_id=483,
+            old_status=ChatMemberStatus.MEMBER,
+            new_status=ChatMemberStatus.BANNED,
+            actor_id=42,
+        ),
+        mock_context,
+    )
+
+    mock_context.bot.send_message.assert_not_awaited()
+    _recently_notified_leave_ids.pop(483, None)
+
+
+async def test_voluntary_leave_skips_notice_for_config_admin(
+    db: Database, mock_context, config: Config, monkeypatch
+):
+    admin_id = config.admin_ids[0]
+    await seed_member(db, admin_id, track_in_group=True)
+    _recently_notified_leave_ids.pop(admin_id, None)
+    monkeypatch.setattr(
+        "bot.handlers.admin.sync_group_members_state",
+        AsyncMock(return_value=_SYNC_EMPTY),
+    )
+
+    await on_chat_member_update(
+        _member_update(
+            user_id=admin_id,
+            old_status=ChatMemberStatus.MEMBER,
+            new_status=ChatMemberStatus.LEFT,
+            actor_id=admin_id,
+        ),
+        mock_context,
+    )
+
+    mock_context.bot.send_message.assert_not_awaited()
 
 
 async def test_matching_member_tag_does_not_rewrite_long_nick(

@@ -53,6 +53,17 @@ def normalize_game_nick(value: str) -> str:
     return nick
 
 
+def guess_game_nick(user) -> str:
+    """Best-effort game nick from a Telegram or Telethon user object."""
+    username = getattr(user, "username", None)
+    first_name = getattr(user, "first_name", None) or ""
+    last_name = getattr(user, "last_name", None) or ""
+    full_name = f"{first_name} {last_name}".strip() or first_name
+    user_id = getattr(user, "id", 0)
+    raw = username or full_name or f"user_{user_id}"
+    return normalize_game_nick(raw)
+
+
 def sanitize_member_tag(value: str) -> str:
     """Trim and clip the tag to fit Telegram's member tag limit."""
     cleaned = (value or "").strip()

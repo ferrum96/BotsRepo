@@ -19,6 +19,7 @@ from bot.events import publish_dashboard_event
 from bot.group_titles import (
     assign_game_nick_tag,
     build_game_nick_tag,
+    guess_game_nick,
     normalize_game_nick,
     remove_from_group_header,
 )
@@ -42,9 +43,11 @@ _soft_kick_user_ids: set[int] = set()
 # After leave/kick, skip survey backfill briefly (Telegram status can lag).
 _recently_left_user_ids: dict[int, float] = {}
 _RECENT_LEAVE_GRACE_SEC = 120.0
-# chat_member + service message can both report one join; notify admins once.
+# chat_member + service message can both report one join/leave; notify once.
 _recently_notified_join_ids: dict[int, float] = {}
+_recently_notified_leave_ids: dict[int, float] = {}
 _JOIN_NOTICE_GRACE_SEC = 300.0
+_LEAVE_NOTICE_GRACE_SEC = 300.0
 
 
 def _mark_recently_left(user_id: int) -> None:
@@ -284,20 +287,15 @@ def _format_member_line(member) -> str:
     )
 
 
-async def _has_completed_survey(db: Database, user_id: int) -> bool:
-    progress = await db.get_progress(user_id)
-    return progress is not None and progress.step == "completed"
-
-
 async def _may_enter_group(db: Database, config: "Config", user_id: int) -> bool:
-    """Allow entry only for vetted users (completed survey or existing member)."""
-    if await db.is_blacklisted(user_id):
-        return False
-    if config.is_admin(user_id):
-        return True
-    if await db.is_member(user_id):
-        return True
-    return await _has_completed_survey(db, user_id)
+    """Allow entry unless blacklisted.
+
+    Survey completers, existing clan members, bot admins, and people who
+    join via an admin-shared invite link all pass. Invite joiners are
+    written to ``members`` on join so they are not kicked.
+    """
+    del config
+    return not await db.is_blacklisted(user_id)
 
 
 async def _refresh_member_tg_profile(db: Database, user) -> None:
@@ -334,6 +332,28 @@ async def _promote_from_completed_survey(db: Database, user) -> bool:
         perspective=progress.perspective or "Mixed",
     )
     await db.clear_progress(user.id)
+    return True
+
+
+async def _import_invite_joiner(db: Database, user) -> bool:
+    """Create a clan member from Telegram profile (admin invite, no survey)."""
+    if await db.is_blacklisted(user.id):
+        return False
+    if await db.is_member(user.id):
+        return True
+    await db.save_member(
+        user_id=user.id,
+        tg_username=user.username,
+        tg_first_name=user.first_name,
+        game_nick=guess_game_nick(user),
+        real_name="",
+        discord_nick=None,
+        perspective="",
+    )
+    logger.info(
+        "Imported invite-link joiner %s as clan member (no survey)",
+        user.id,
+    )
     return True
 
 
@@ -499,13 +519,57 @@ async def _apply_default_member_permissions(
         return False
 
 
-def _should_notify_join(user_id: int) -> bool:
-    notified_at = _recently_notified_join_ids.get(user_id)
+def _should_notify_once(
+    store: dict[int, float], user_id: int, grace_sec: float
+) -> bool:
+    notified_at = store.get(user_id)
     now = time.monotonic()
-    if notified_at is not None and now - notified_at <= _JOIN_NOTICE_GRACE_SEC:
+    if notified_at is not None and now - notified_at <= grace_sec:
         return False
-    _recently_notified_join_ids[user_id] = now
+    store[user_id] = now
     return True
+
+
+def _should_notify_join(user_id: int) -> bool:
+    return _should_notify_once(
+        _recently_notified_join_ids, user_id, _JOIN_NOTICE_GRACE_SEC
+    )
+
+
+def _should_notify_leave(user_id: int) -> bool:
+    return _should_notify_once(
+        _recently_notified_leave_ids, user_id, _LEAVE_NOTICE_GRACE_SEC
+    )
+
+
+def _is_self_action(actor, user_id: int) -> bool:
+    return actor is not None and getattr(actor, "id", None) == user_id
+
+
+def _member_profile_lines(user, member) -> list[str]:
+    lines: list[str] = []
+    username = getattr(user, "username", None) or (
+        member.tg_username if member else None
+    )
+    if username:
+        lines.append(f"TG: @{username}")
+    lines.append(f"Имя: {member.real_name if member else '—'}")
+    lines.append(f"Ник в игре: {member.game_nick if member else '—'}")
+    lines.append(f"Discord: {(member.discord_nick if member else None) or '—'}")
+    lines.append(f"Режим: {(member.perspective if member else None) or '—'}")
+    return lines
+
+
+async def _dm_admins(bot: Bot, config: "Config", text: str, *, user_id: int) -> None:
+    for admin_id in config.admin_ids:
+        try:
+            await bot.send_message(chat_id=admin_id, text=text)
+        except (BadRequest, Forbidden, TelegramError):
+            logger.warning(
+                "Failed to notify admin %s about user %s",
+                admin_id,
+                user_id,
+            )
 
 
 async def _notify_admins_about_new_member(
@@ -519,28 +583,27 @@ async def _notify_admins_about_new_member(
         return
     if not _should_notify_join(user.id):
         return
-
-    lines = ["Новый участник в группе:", f"Telegram ID: {user.id}"]
-    username = getattr(user, "username", None) or (
-        member.tg_username if member else None
+    text = "\n".join(
+        ["Новый участник в группе:", *_member_profile_lines(user, member)]
     )
-    if username:
-        lines.append(f"TG: @{username}")
-    lines.append(f"Имя: {member.real_name if member else '—'}")
-    lines.append(f"Ник в игре: {member.game_nick if member else '—'}")
-    lines.append(f"Discord: {(member.discord_nick if member else None) or '—'}")
-    lines.append(f"Режим: {(member.perspective if member else None) or '—'}")
-    text = "\n".join(lines)
+    await _dm_admins(bot, config, text, user_id=user.id)
 
-    for admin_id in config.admin_ids:
-        try:
-            await bot.send_message(chat_id=admin_id, text=text)
-        except (BadRequest, Forbidden, TelegramError):
-            logger.warning(
-                "Failed to notify admin %s about new member %s",
-                admin_id,
-                user.id,
-            )
+
+async def _notify_admins_about_voluntary_leave(
+    bot: Bot,
+    config: "Config",
+    user,
+    member,
+) -> None:
+    """DM every ADMIN_IDS entry when a player leaves the group themselves."""
+    if not config.admin_ids or config.is_admin(user.id):
+        return
+    if not _should_notify_leave(user.id):
+        return
+    text = "\n".join(
+        ["Участник вышел из группы:", *_member_profile_lines(user, member)]
+    )
+    await _dm_admins(bot, config, text, user_id=user.id)
 
 
 async def _handle_vetted_group_join(
@@ -559,8 +622,13 @@ async def _handle_vetted_group_join(
         if not promoted and not await db.is_member(user.id):
             # Re-check membership: concurrent sync may have imported this user
             # and cleared survey progress while we were handling the join.
-            await _reject_unauthorized_join(bot, config, db, user.id)
-            return
+            # Admin-shared invite: no survey — still save a clan row so we
+            # do not soft-kick. Bot admins are not stored as clan members.
+            if not config.is_admin(user.id):
+                imported = await _import_invite_joiner(db, user)
+                if not imported:
+                    await _reject_unauthorized_join(bot, config, db, user.id)
+                    return
 
     await _apply_default_member_permissions(bot, config, user.id)
 
@@ -1005,8 +1073,7 @@ async def on_chat_member_update(
     if new_status in joined_statuses and old_status not in joined_statuses:
         if not await _may_enter_group(db, config, user.id):
             logger.info(
-                "Rejecting unauthorized join for user %s "
-                "(blacklist/unvetted)",
+                "Rejecting unauthorized join for user %s (blacklist)",
                 user.id,
             )
             await _reject_unauthorized_join(context.bot, config, db, user.id)
@@ -1037,19 +1104,24 @@ async def on_chat_member_update(
             )
         else:
             # Leave or admin kick/ban — purge clan DB (no blacklist).
+            member_snapshot = await db.get_member(user.id)
             deleted = await db.delete_member(user.id)
             _mark_recently_left(user.id)
-            reason = (
-                "admin_kick_ban"
-                if new_status == ChatMemberStatus.BANNED
-                else "voluntary_leave"
-            )
+            is_ban = new_status == ChatMemberStatus.BANNED
+            reason = "admin_kick_ban" if is_ban else "voluntary_leave"
             logger.info(
                 "User %s left/removed (%s), deleted_from_clan=%s",
                 user.id,
                 reason,
                 deleted,
             )
+            if (
+                not is_ban
+                and _is_self_action(update.chat_member.from_user, user.id)
+            ):
+                await _notify_admins_about_voluntary_leave(
+                    context.bot, config, user, member_snapshot
+                )
             if deleted:
                 await publish_dashboard_event(
                     config,
@@ -1143,8 +1215,14 @@ async def on_group_membership_message_event(
             await db.untrack_group_member(left_id)
         else:
             # Service leave/kick — purge clan row (no blacklist).
+            left_user = update.message.left_chat_member
+            member_snapshot = await db.get_member(left_id)
             deleted = await db.delete_member(left_id)
             _mark_recently_left(left_id)
+            if _is_self_action(update.message.from_user, left_id):
+                await _notify_admins_about_voluntary_leave(
+                    context.bot, config, left_user, member_snapshot
+                )
             if deleted:
                 await publish_dashboard_event(
                     config,
@@ -1165,7 +1243,7 @@ async def on_group_membership_message_event(
                 continue
             if not await _may_enter_group(db, config, user.id):
                 logger.info(
-                    "Rejecting unauthorized fallback join for user %s",
+                    "Rejecting unauthorized fallback join for user %s (blacklist)",
                     user.id,
                 )
                 await _reject_unauthorized_join(context.bot, config, db, user.id)
@@ -1200,7 +1278,7 @@ async def on_group_membership_message_event(
 async def on_chat_join_request(
     update: Update, context: ContextTypes.DEFAULT_TYPE
 ) -> None:
-    """Auto-approve join requests only for vetted users."""
+    """Auto-approve join requests except blacklisted users."""
     req = update.chat_join_request
     if not req:
         return
@@ -1232,7 +1310,7 @@ async def on_chat_join_request(
 
     if not await _may_enter_group(db, config, user.id):
         logger.info(
-            "Join request from unvetted user %s declined (survey not completed)",
+            "Join request from user %s declined (blacklist)",
             user.id,
         )
         try:
@@ -1242,7 +1320,7 @@ async def on_chat_join_request(
             )
         except (BadRequest, Forbidden, TelegramError):
             logger.exception(
-                "Failed to decline join request for unvetted user %s",
+                "Failed to decline join request for user %s",
                 user.id,
             )
         return

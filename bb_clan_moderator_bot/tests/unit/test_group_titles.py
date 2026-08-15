@@ -1,3 +1,4 @@
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 from bot.group_titles import (
@@ -6,6 +7,7 @@ from bot.group_titles import (
     assign_game_nick_tag,
     build_game_nick_tag,
     build_game_nick_title,
+    guess_game_nick,
     sanitize_custom_title,
     sanitize_member_tag,
 )
@@ -44,6 +46,22 @@ def test_build_game_nick_tag_empty_after_normalize():
 
 def test_build_game_nick_tag_preserves_short_nicks():
     assert build_game_nick_tag("Pro") == "Pro"
+
+
+def test_guess_game_nick_prefers_username():
+    user = SimpleNamespace(
+        id=1, username="alice", first_name="Alice", last_name="A"
+    )
+    assert guess_game_nick(user) == "alice"
+
+
+def test_guess_game_nick_falls_back_to_name_then_id():
+    named = SimpleNamespace(
+        id=2, username=None, first_name="Bob", last_name="Builder"
+    )
+    assert guess_game_nick(named) == "Bob Builder"
+    empty = SimpleNamespace(id=3, username=None, first_name="", last_name="")
+    assert guess_game_nick(empty) == "user_3"
 
 
 async def test_assign_game_nick_tag_http(monkeypatch):

@@ -8,7 +8,7 @@ from typing import Any, Optional
 
 from bot.config import Config
 from bot.database import Database
-from bot.group_titles import normalize_game_nick
+from bot.group_titles import guess_game_nick
 
 logger = logging.getLogger(__name__)
 
@@ -43,16 +43,6 @@ def _participant_joined_at(user: Any) -> Optional[str]:
             date = date.replace(tzinfo=timezone.utc)
         return date.isoformat()
     return None
-
-
-def _guess_nick(user: Any) -> str:
-    username = getattr(user, "username", None)
-    first_name = getattr(user, "first_name", None) or ""
-    last_name = getattr(user, "last_name", None) or ""
-    full_name = f"{first_name} {last_name}".strip() or first_name
-    user_id = getattr(user, "id", 0)
-    raw = username or full_name or f"user_{user_id}"
-    return normalize_game_nick(raw)
 
 
 async def import_all_chat_participants(
@@ -126,7 +116,7 @@ async def import_all_chat_participants(
                     result["tracked"] += 1
                     continue
 
-                guessed = _guess_nick(user)
+                guessed = guess_game_nick(user)
                 await db.save_member(
                     user_id=user_id,
                     tg_username=getattr(user, "username", None),
