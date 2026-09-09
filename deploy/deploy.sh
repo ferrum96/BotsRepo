@@ -6,6 +6,7 @@ export PATH="/root/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:
 DEPLOY_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_DIR="$(cd "${DEPLOY_DIR}/.." && pwd)"
 BB_CLAN_DIR="${REPO_DIR}/bb_clan_moderator_bot"
+ASTROSTONE_DIR="${REPO_DIR}/fl_5521193"
 PORTS_FILE="${DEPLOY_DIR}/ports.env"
 DOMAINS_ENV_FILE="${DEPLOY_DIR}/domains.env"
 CADDY_SETUP_SCRIPT="${DEPLOY_DIR}/duckdns-caddy-setup.sh"
@@ -22,6 +23,7 @@ SERVICES=(
   kanban
   bb-clan-api
   bb-clan-bot
+  astrostone-mvp
   deploy-webhook
 )
 
@@ -37,6 +39,8 @@ NEEDS_BB_CLAN_BOT=false
 NEEDS_BB_CLAN_FRONTEND_BUILD=false
 NEEDS_BB_CLAN_PIP=false
 NEEDS_BB_CLAN_MIGRATE=false
+NEEDS_ASTROSTONE=false
+NEEDS_ASTROSTONE_VENV=false
 RESTART_SERVICES=()
 CHANGED_FILES=""
 
@@ -54,6 +58,8 @@ mark_all_services() {
   NEEDS_BB_CLAN_FRONTEND_BUILD=true
   NEEDS_BB_CLAN_PIP=true
   NEEDS_BB_CLAN_MIGRATE=true
+  NEEDS_ASTROSTONE=true
+  NEEDS_ASTROSTONE_VENV=true
 }
 
 # Read KEY=value from .env without bash `source` (safe for | @ spaces).
@@ -143,6 +149,15 @@ mark_services_from_file() {
       mark_service_for_restart bb-clan-api
       mark_service_for_restart bb-clan-bot
       ;;
+    fl_5521193/requirements.txt)
+      NEEDS_ASTROSTONE=true
+      NEEDS_ASTROSTONE_VENV=true
+      mark_service_for_restart astrostone-mvp
+      ;;
+    fl_5521193/*)
+      NEEDS_ASTROSTONE=true
+      mark_service_for_restart astrostone-mvp
+      ;;
     deploy/systemd/kanban.service)
       NEEDS_KANBAN=true
       mark_service_for_restart kanban
@@ -154,6 +169,11 @@ mark_services_from_file() {
     deploy/systemd/bb-clan-bot.service)
       NEEDS_BB_CLAN_BOT=true
       mark_service_for_restart bb-clan-bot
+      ;;
+    deploy/systemd/astrostone-mvp.service)
+      NEEDS_ASTROSTONE=true
+      NEEDS_ASTROSTONE_VENV=true
+      mark_service_for_restart astrostone-mvp
       ;;
     deploy/systemd/deploy-webhook.service|deploy/webhook.py|deploy/deploy.sh|deploy/webhook.env|deploy/webhook.env.example)
       mark_service_for_restart deploy-webhook
@@ -274,6 +294,13 @@ bootstrap_missing_artifacts() {
     NEEDS_BB_CLAN_API=true
     NEEDS_BB_CLAN_FRONTEND_BUILD=true
     mark_service_for_restart bb-clan-api
+  fi
+
+  if [ ! -x "${ASTROSTONE_DIR}/.venv/bin/uvicorn" ]; then
+    echo "Bootstrap: AstroStone venv отсутствует — создаю"
+    NEEDS_ASTROSTONE=true
+    NEEDS_ASTROSTONE_VENV=true
+    mark_service_for_restart astrostone-mvp
   fi
 
   # Crash-loop / first boot left services down even when artifacts already exist.
@@ -464,6 +491,7 @@ ufw_allow_tcp() {
 
 ensure_ufw_ports() {
   ufw_allow_tcp "${PORT_DEPLOY_WEBHOOK_PUBLIC:-450}" "deploy webhook"
+  ufw_allow_tcp "${PORT_ASTROSTONE_MVP_PUBLIC:-449}" "astrostone mvp"
   ufw_allow_tcp 80 "http / ACME"
   ufw_allow_tcp 443 "https"
 }
@@ -700,6 +728,10 @@ bb_clan_api_port() {
   echo "${PORT_BB_CLAN_API:-${PORT_PUBG_API:-8080}}"
 }
 
+astrostone_mvp_port() {
+  echo "${PORT_ASTROSTONE_MVP:-5521}"
+}
+
 verify_bb_clan_api() {
   local port
   port="$(bb_clan_api_port)"
@@ -730,6 +762,53 @@ should_restart_bb_clan_api() {
     fi
   done
   return 1
+}
+
+should_restart_astrostone_mvp() {
+  local service
+  for service in "${RESTART_SERVICES[@]}"; do
+    if [ "$service" = "astrostone-mvp" ]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+verify_astrostone_mvp() {
+  local port
+  port="$(astrostone_mvp_port)"
+  echo "Проверка astrostone-mvp на :${port}..."
+
+  if ! systemctl is-active --quiet astrostone-mvp 2>/dev/null; then
+    echo "ОШИБКА: astrostone-mvp не запущен"
+    journalctl -u astrostone-mvp -n 30 --no-pager || true
+    return 1
+  fi
+
+  if curl -sf "http://127.0.0.1:${port}/health" >/dev/null; then
+    echo "  astrostone-mvp OK (http://127.0.0.1:${port}/health)"
+    return 0
+  fi
+
+  echo "ОШИБКА: astrostone-mvp не отвечает на :${port}"
+  journalctl -u astrostone-mvp -n 30 --no-pager || true
+  ss -tlnp | grep ":${port}" || echo "  порт ${port} не слушается"
+  return 1
+}
+
+ensure_astrostone_venv() {
+  local py
+  py="$(command -v python3.12 || command -v python3)"
+  if [ -z "$py" ]; then
+    echo "AstroStone: python3 не найден"
+    return 1
+  fi
+  echo "AstroStone: venv (${py})..."
+  if [ ! -d "${ASTROSTONE_DIR}/.venv" ]; then
+    "$py" -m venv "${ASTROSTONE_DIR}/.venv"
+  fi
+  "${ASTROSTONE_DIR}/.venv/bin/pip" install -q -U pip
+  "${ASTROSTONE_DIR}/.venv/bin/pip" install -q -r "${ASTROSTONE_DIR}/requirements.txt"
 }
 
 ensure_backup_deps() {
@@ -823,6 +902,14 @@ else
   echo "BB Clan: без изменений — пропуск сборки"
 fi
 
+if [ "$NEEDS_ASTROSTONE" = true ] || [ "$NEEDS_ASTROSTONE_VENV" = true ]; then
+  echo "AstroStone MVP: обновление..."
+  ensure_astrostone_venv
+  mark_service_for_restart astrostone-mvp
+else
+  echo "AstroStone MVP: без изменений — пропуск"
+fi
+
 echo ""
 restart_services
 
@@ -836,9 +923,15 @@ else
   echo "bb-clan-api не перезапускался — пропуск health-check"
 fi
 
+if should_restart_astrostone_mvp; then
+  verify_astrostone_mvp || true
+else
+  echo "astrostone-mvp не перезапускался — пропуск health-check"
+fi
+
 echo ""
 echo "=== Деплой завершен ==="
-echo "Порты: bb-clan :447 (→:$(bb_clan_api_port)) | kanban :448 (→:${PORT_KANBAN:-3002}) | webhook :${PORT_DEPLOY_WEBHOOK_PUBLIC:-450} (→:${PORT_DEPLOY_WEBHOOK:-9000})"
+echo "Порты: bb-clan :447 (→:$(bb_clan_api_port)) | kanban :448 (→:${PORT_KANBAN:-3002}) | astrostone :${PORT_ASTROSTONE_MVP_PUBLIC:-449} (→:$(astrostone_mvp_port)) | webhook :${PORT_DEPLOY_WEBHOOK_PUBLIC:-450} (→:${PORT_DEPLOY_WEBHOOK:-9000})"
 echo "GitHub webhook (HTTP): http://IP:${PORT_DEPLOY_WEBHOOK_PUBLIC:-450}/  | HTTPS: https://GATEWAY${DEPLOY_WEBHOOK_PATH:-/hooks/deploy}"
 echo "FKandu: отключён (unit-файлы в deploy/systemd/disabled/)"
 if [ ${#RESTART_SERVICES[@]} -gt 0 ]; then

@@ -95,6 +95,7 @@ ROUTE_HELPER_PATH="/usr/local/bin/caddy-route"
 PORT_KANBAN=3002
 PORT_BB_CLAN_API=8080
 PORT_PUBG_API=8080
+PORT_ASTROSTONE_MVP=5521
 PORT_FKANDU_DASHBOARD=3000
 PORT_FKANDU_API=8000
 PORT_FKANDU_BOT_FILES=8088
@@ -108,6 +109,7 @@ ENABLE_FKANDU="${ENABLE_FKANDU:-0}"
 GATEWAY_DOMAIN=""
 SERVICE_DOMAIN_KANBAN=""
 SERVICE_DOMAIN_BB_CLAN=""
+SERVICE_DOMAIN_ASTROSTONE=""
 SERVICE_DOMAIN_FKANDU=""
 SERVICE_DOMAIN_FKANDU_DASHBOARD=""
 SERVICE_DOMAIN_FKANDU_API=""
@@ -147,6 +149,7 @@ if [[ -z "${EFFECTIVE_SERVICE_DOMAIN_FKANDU_DASHBOARD}" ]]; then
 fi
 
 EFFECTIVE_BB_CLAN_PORT="${PORT_BB_CLAN_API:-${PORT_PUBG_API:-8080}}"
+EFFECTIVE_ASTROSTONE_PORT="${PORT_ASTROSTONE_MVP:-5521}"
 
 if [[ "${ENABLE_FKANDU}" = "1" ]]; then
   warn_if_domain_matches_gateway() {
@@ -278,7 +281,7 @@ if [[ -n "${SINGLE_UPSTREAM}" ]]; then
   write_route "root" "/" "127.0.0.1:${SINGLE_UPSTREAM}"
 fi
 
-# Always expose deploy webhook on HTTPS gateway (GitHub cannot use closed :449 after ufw).
+# Always expose deploy webhook on HTTPS gateway (prefer :450 / path).
 write_route "deploy-webhook" "${DEPLOY_WEBHOOK_PATH}" "127.0.0.1:${PORT_DEPLOY_WEBHOOK}"
 
 # When kanban has no dedicated host, it is the default site on GATEWAY_DOMAIN (/).
@@ -307,6 +310,7 @@ fi
 
 UPSTREAM_KANBAN="127.0.0.1:${PORT_KANBAN}"
 UPSTREAM_BB_CLAN="127.0.0.1:${EFFECTIVE_BB_CLAN_PORT}"
+UPSTREAM_ASTROSTONE="127.0.0.1:${EFFECTIVE_ASTROSTONE_PORT}"
 UPSTREAM_FKANDU_DASHBOARD="127.0.0.1:${PORT_FKANDU_DASHBOARD}"
 UPSTREAM_FKANDU_API="127.0.0.1:${PORT_FKANDU_API}"
 UPSTREAM_FKANDU_FILES="127.0.0.1:${PORT_FKANDU_BOT_FILES}"
@@ -371,6 +375,7 @@ fi
 
 append_domain_proxy_block "${TMP_CADDYFILE}" "${SERVICE_DOMAIN_KANBAN}" "${UPSTREAM_KANBAN}" "kanban"
 append_domain_proxy_block "${TMP_CADDYFILE}" "${EFFECTIVE_SERVICE_DOMAIN_BB_CLAN}" "${UPSTREAM_BB_CLAN}" "bb-clan"
+append_domain_proxy_block "${TMP_CADDYFILE}" "${SERVICE_DOMAIN_ASTROSTONE}" "${UPSTREAM_ASTROSTONE}" "astrostone-mvp"
 if [[ "${ENABLE_FKANDU}" = "1" ]]; then
   append_domain_proxy_block "${TMP_CADDYFILE}" "${EFFECTIVE_SERVICE_DOMAIN_FKANDU_DASHBOARD}" "${UPSTREAM_FKANDU_DASHBOARD}" "fkandu-dashboard"
   append_domain_proxy_block "${TMP_CADDYFILE}" "${SERVICE_DOMAIN_FKANDU_API}" "${UPSTREAM_FKANDU_API}" "fkandu-api"
@@ -402,6 +407,7 @@ if [[ "${SKIP_FIREWALL}" = "0" ]]; then
   run ufw allow 443/tcp
   # HTTP deploy webhook (nginx); without this GitHub gets "failed to connect"
   run ufw allow "${PORT_DEPLOY_WEBHOOK_PUBLIC:-450}/tcp"
+  run ufw allow "${PORT_ASTROSTONE_MVP_PUBLIC:-449}/tcp"
   run ufw --force enable
 fi
 
@@ -450,6 +456,9 @@ if [[ -n "${SERVICE_DOMAIN_KANBAN}" ]]; then
 fi
 if [[ -n "${EFFECTIVE_SERVICE_DOMAIN_BB_CLAN}" ]]; then
   echo "BB Clan domain: https://${EFFECTIVE_SERVICE_DOMAIN_BB_CLAN}"
+fi
+if [[ -n "${SERVICE_DOMAIN_ASTROSTONE}" ]]; then
+  echo "AstroStone MVP domain: https://${SERVICE_DOMAIN_ASTROSTONE}"
 fi
 if [[ "${ENABLE_FKANDU}" = "1" ]]; then
   if [[ -n "${EFFECTIVE_SERVICE_DOMAIN_FKANDU_DASHBOARD}" ]]; then

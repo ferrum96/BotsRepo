@@ -3,7 +3,7 @@
 > **Локальная разработка** — Docker: см. [DEV.md](../DEV.md)  
 > **Production на сервере** — systemd (сервисы) + nginx (legacy порты) + caddy (HTTPS).
 
-**Активные сервисы:** `kanban`, `bb-clan-api`, `bb-clan-bot`, `deploy-webhook`.  
+**Активные сервисы:** `kanban`, `bb-clan-api`, `bb-clan-bot`, `astrostone-mvp`, `deploy-webhook`.  
 **FKandu отключён** — unit-файлы в `deploy/systemd/disabled/` (деплой не ставит и останавливает, если ещё крутятся).
 
 ## Содержимое `deploy/`
@@ -19,11 +19,12 @@ deploy/
 ├── duckdns-caddy-setup.sh      # HTTPS gateway (HTTP-01)
 ├── duckdns-dns01-caddy-setup.sh# HTTPS gateway (DNS-01 fallback)
 ├── nginx/
-│   └── nginx-systemd.conf      # nginx для VPS (порты 447, 448, 450)
+│   └── nginx-systemd.conf      # nginx для VPS (порты 447, 448, 449, 450)
 ├── systemd/                    # активные unit-файлы → /etc/systemd/system/
 │   ├── kanban.service
 │   ├── bb-clan-api.service
 │   ├── bb-clan-bot.service
+│   ├── astrostone-mvp.service
 │   ├── deploy-webhook.service
 │   └── disabled/               # fkandu-* (не устанавливаются)
 └── DEPLOY.md                   # эта документация
@@ -72,6 +73,8 @@ git clone git@github.com:ferrum96/BotsRepo.git
 |-----------|--------|------------------------|
 | **447** | BB Clan dashboard + API | **8080** |
 | **448** | kanban | **3002** |
+| **449** | AstroStone MVP (`fl_5521193`) | **5521** |
+| **450** | GitHub webhook (nginx HTTP) | **9000** |
 | **450** | GitHub webhook (nginx HTTP) | **9000** |
 | **443** `/hooks/deploy` | GitHub webhook (Caddy HTTPS, опционально) | **9000** |
 
@@ -209,6 +212,7 @@ DEPLOY_ALL=1 ./deploy/deploy.sh
 | `bb_clan_moderator_bot/dashboard/frontend/` | `bb-clan-api` (+ сборка SPA) |
 | `bb_clan_moderator_bot/dashboard/backend/`, `bot/` | `bb-clan-api`, `bb-clan-bot` |
 | `bb_clan_moderator_bot/alembic/` | `bb-clan-api`, `bb-clan-bot` (+ миграции) |
+| `fl_5521193/` | `astrostone-mvp` (+ venv/pip) |
 | `fkandu_manager_bot/*` | игнор (сервис отключён) |
 | `deploy/webhook.py`, `deploy/systemd/deploy-webhook.service` | `deploy-webhook` |
 | `deploy/ports.env` | рестарт всех активных сервисов |
@@ -217,7 +221,7 @@ DEPLOY_ALL=1 ./deploy/deploy.sh
 ## Управление
 
 ```bash
-systemctl status kanban bb-clan-api bb-clan-bot deploy-webhook
+systemctl status kanban bb-clan-api bb-clan-bot astrostone-mvp deploy-webhook
 journalctl -u bb-clan-api -f
 journalctl -u deploy-webhook -f
 systemctl restart bb-clan-api
@@ -229,6 +233,7 @@ systemctl restart bb-clan-api
 |-----|----------|
 | http://IP:447 | BB Clan dashboard (legacy nginx) |
 | http://IP:448 | Kanban (legacy nginx) |
+| http://IP:449 | AstroStone MVP (`fl_5521193`) |
 | http://IP:450/ | GitHub deploy webhook (HTTP, нужен `ufw allow 450`) |
 | https://GATEWAY/hooks/deploy | GitHub deploy webhook (HTTPS, опционально) |
 | https://bb-clan.duckdns.org/ | BB Clan (Caddy, если настроен) |
