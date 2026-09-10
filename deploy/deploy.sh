@@ -149,14 +149,12 @@ mark_services_from_file() {
       mark_service_for_restart bb-clan-api
       mark_service_for_restart bb-clan-bot
       ;;
-    fl_5521193/requirements.txt)
-      NEEDS_ASTROSTONE=true
-      NEEDS_ASTROSTONE_VENV=true
-      mark_service_for_restart astrostone-mvp
-      ;;
     fl_5521193/*)
-      NEEDS_ASTROSTONE=true
-      mark_service_for_restart astrostone-mvp
+      # Python demo replaced by NestJS (no uvicorn / requirements.txt).
+      # Do not pip-install or restart astrostone-mvp: that would fail the whole
+      # deploy (set -e) and crash-loop the unit. Live process keeps old code
+      # in memory until a manual restart/reboot.
+      echo "AstroStone: NestJS stack not wired to systemd yet — skip astrostone-mvp"
       ;;
     portfolio/*)
       # static site — nginx root, reload via ensure_nginx
@@ -907,12 +905,12 @@ else
   echo "BB Clan: без изменений — пропуск сборки"
 fi
 
-if [ "$NEEDS_ASTROSTONE" = true ] || [ "$NEEDS_ASTROSTONE_VENV" = true ]; then
+if [ -f "${ASTROSTONE_DIR}/requirements.txt" ] && { [ "$NEEDS_ASTROSTONE" = true ] || [ "$NEEDS_ASTROSTONE_VENV" = true ]; }; then
   echo "AstroStone MVP: обновление..."
   ensure_astrostone_venv
   mark_service_for_restart astrostone-mvp
 else
-  echo "AstroStone MVP: без изменений — пропуск"
+  echo "AstroStone MVP: без изменений или Python demo снят — пропуск"
 fi
 
 echo ""

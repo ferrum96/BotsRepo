@@ -1,0 +1,43 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: astro
+      POSTGRES_PASSWORD: astro
+      POSTGRES_DB: astrostone
+    ports:
+      - "5433:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U astro -d astrostone"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    env_file: .env
+    environment:
+      DATABASE_URL: postgres://astro:astro@postgres:5432/astrostone
+    ports:
+      - "3000:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  worker:
+    build:
+      context: .
+      dockerfile: apps/worker/Dockerfile
+    env_file: .env
+    environment:
+      DATABASE_URL: postgres://astro:astro@postgres:5432/astrostone
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  pgdata:

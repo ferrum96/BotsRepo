@@ -1,0 +1,31 @@
+{
+  "name": "astrostone",
+  "private": true,
+  "version": "0.1.0",
+  "description": "AstroStone partner acquisition automation: import, dedup, amoCRM, outreach",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "engines": {
+    "node": ">=20.10"
+  },
+  "scripts": {
+    "build": "npm run build --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "db:generate": "npm run generate -w @astrostone/db",
+    "db:migrate": "npm run migrate -w @astrostone/db",
+    "db:seed": "npm run seed -w @astrostone/db",
+    "dev:api": "npm run dev -w @astrostone/api",
+    "dev:worker": "npm run dev -w @astrostone/worker",
+    "demo": "tsx scripts/demo-flow.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  }
+}

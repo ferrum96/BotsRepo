@@ -1,0 +1,20 @@
+{
+  "name": "@astrostone/worker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/main.ts",
+    "start": "tsx src/main.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@astrostone/contracts": "*",
+    "@astrostone/core": "*",
+    "@astrostone/db": "*",
+    "@astrostone/queue": "*",
+    "drizzle-orm": "^0.38.3",
+    "pino": "^9.5.0",
+    "zod": "^3.24.1"
+  }
+}
