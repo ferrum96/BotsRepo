@@ -19,7 +19,7 @@ deploy/
 ├── duckdns-caddy-setup.sh      # HTTPS gateway (HTTP-01)
 ├── duckdns-dns01-caddy-setup.sh# HTTPS gateway (DNS-01 fallback)
 ├── nginx/
-│   └── nginx-systemd.conf      # nginx для VPS (порты 447, 448, 449, 450)
+│   └── nginx-systemd.conf      # nginx для VPS (порты 447–451)
 ├── systemd/                    # активные unit-файлы → /etc/systemd/system/
 │   ├── kanban.service
 │   ├── bb-clan-api.service
@@ -75,7 +75,7 @@ git clone git@github.com:ferrum96/BotsRepo.git
 | **448** | kanban | **3002** |
 | **449** | AstroStone MVP (`fl_5521193`) | **5521** |
 | **450** | GitHub webhook (nginx HTTP) | **9000** |
-| **450** | GitHub webhook (nginx HTTP) | **9000** |
+| **451** | Portfolio (`portfolio/`, static) | nginx root |
 | **443** `/hooks/deploy` | GitHub webhook (Caddy HTTPS, опционально) | **9000** |
 
 Legacy-алиасы `PORT_PUBG_*` (= `PORT_BB_CLAN_*`) оставлены для совместимости.  
@@ -234,6 +234,7 @@ systemctl restart bb-clan-api
 | http://IP:447 | BB Clan dashboard (legacy nginx) |
 | http://IP:448 | Kanban (legacy nginx) |
 | http://IP:449 | AstroStone MVP (`fl_5521193`) |
+| http://IP:451 | Portfolio (`portfolio/`) |
 | http://IP:450/ | GitHub deploy webhook (HTTP, нужен `ufw allow 450`) |
 | https://GATEWAY/hooks/deploy | GitHub deploy webhook (HTTPS, опционально) |
 | https://bb-clan.duckdns.org/ | BB Clan (Caddy, если настроен) |

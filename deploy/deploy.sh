@@ -158,6 +158,10 @@ mark_services_from_file() {
       NEEDS_ASTROSTONE=true
       mark_service_for_restart astrostone-mvp
       ;;
+    portfolio/*)
+      # static site — nginx root, reload via ensure_nginx
+      :
+      ;;
     deploy/systemd/kanban.service)
       NEEDS_KANBAN=true
       mark_service_for_restart kanban
@@ -492,6 +496,7 @@ ufw_allow_tcp() {
 ensure_ufw_ports() {
   ufw_allow_tcp "${PORT_DEPLOY_WEBHOOK_PUBLIC:-450}" "deploy webhook"
   ufw_allow_tcp "${PORT_ASTROSTONE_MVP_PUBLIC:-449}" "astrostone mvp"
+  ufw_allow_tcp "${PORT_PORTFOLIO_PUBLIC:-451}" "portfolio"
   ufw_allow_tcp 80 "http / ACME"
   ufw_allow_tcp 443 "https"
 }
@@ -931,7 +936,7 @@ fi
 
 echo ""
 echo "=== Деплой завершен ==="
-echo "Порты: bb-clan :447 (→:$(bb_clan_api_port)) | kanban :448 (→:${PORT_KANBAN:-3002}) | astrostone :${PORT_ASTROSTONE_MVP_PUBLIC:-449} (→:$(astrostone_mvp_port)) | webhook :${PORT_DEPLOY_WEBHOOK_PUBLIC:-450} (→:${PORT_DEPLOY_WEBHOOK:-9000})"
+echo "Порты: bb-clan :447 (→:$(bb_clan_api_port)) | kanban :448 (→:${PORT_KANBAN:-3002}) | astrostone :${PORT_ASTROSTONE_MVP_PUBLIC:-449} (→:$(astrostone_mvp_port)) | portfolio :${PORT_PORTFOLIO_PUBLIC:-451} | webhook :${PORT_DEPLOY_WEBHOOK_PUBLIC:-450} (→:${PORT_DEPLOY_WEBHOOK:-9000})"
 echo "GitHub webhook (HTTP): http://IP:${PORT_DEPLOY_WEBHOOK_PUBLIC:-450}/  | HTTPS: https://GATEWAY${DEPLOY_WEBHOOK_PATH:-/hooks/deploy}"
 echo "FKandu: отключён (unit-файлы в deploy/systemd/disabled/)"
 if [ ${#RESTART_SERVICES[@]} -gt 0 ]; then

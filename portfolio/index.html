@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="description" content="RELAY — разработка Telegram-ботов: модерация сообществ, CRM заявок, дашборды, деплой на VPS." />
+  <title>RELAY — Telegram-боты под ключ</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Oxanium:wght@500;600;700&family=Source+Sans+3:ital,wght@0,400;0,500;0,600;1,400&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="noise" aria-hidden="true"></div>
+
+  <header class="hero">
+    <div class="hero-visual" aria-hidden="true">
+      <svg class="hero-mesh" viewBox="0 0 1200 800" preserveAspectRatio="xMidYMid slice">
+        <defs>
+          <linearGradient id="beam" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stop-color="#3ddc97" stop-opacity="0.55" />
+            <stop offset="55%" stop-color="#e8873a" stop-opacity="0.2" />
+            <stop offset="100%" stop-color="#3ddc97" stop-opacity="0" />
+          </linearGradient>
+          <radialGradient id="glow" cx="70%" cy="35%" r="45%">
+            <stop offset="0%" stop-color="#3ddc97" stop-opacity="0.28" />
+            <stop offset="100%" stop-color="#070b12" stop-opacity="0" />
+          </radialGradient>
+        </defs>
+        <rect width="1200" height="800" fill="url(#glow)" />
+        <g class="mesh-lines" stroke="url(#beam)" stroke-width="1.2" fill="none">
+          <path d="M80 640 C220 480, 340 520, 480 360 S760 180, 1120 120" />
+          <path d="M40 520 C200 400, 380 440, 540 280 S820 140, 1180 220" />
+          <path d="M120 720 C300 560, 420 600, 600 420 S900 260, 1160 340" />
+        </g>
+        <g class="nodes" fill="#3ddc97">
+          <circle cx="480" cy="360" r="4" />
+          <circle cx="760" cy="180" r="3.5" />
+          <circle cx="540" cy="280" r="3" />
+          <circle cx="600" cy="420" r="4.5" />
+          <circle cx="900" cy="260" r="3" />
+        </g>
+        <g class="pulse-ring" fill="none" stroke="#3ddc97" stroke-width="1.5">
+          <circle cx="600" cy="420" r="18" opacity="0.5" />
+        </g>
+      </svg>
+    </div>
+
+    <div class="hero-inner">
+      <p class="brand">RELAY</p>
+      <h1 class="headline">Telegram-боты<br />под ключ</h1>
+      <p class="lede">Опрос, модерация групп, CRM заявок и админ-панели — с деплоем на VPS.</p>
+      <div class="cta-row">
+        <a class="btn primary" href="#contact">Связаться</a>
+        <a class="btn ghost" href="#works">Работы</a>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <section class="works" id="works">
+      <header class="section-head">
+        <h2>Проекты</h2>
+        <p>Два продакшен-кейса: модерация сообщества и воронка заявок.</p>
+      </header>
+
+      <article class="work reveal" data-work="clan">
+        <div class="work-index">01</div>
+        <div class="work-body">
+          <h3>Модератор клана</h3>
+          <p class="work-summary">
+            Опрос новичков, blacklist, sync состава группы, activity-мониторинг,
+            SPA-дашборд, production HTTPS.
+          </p>
+          <ul class="tags">
+            <li>python-telegram-bot</li>
+            <li>Telethon</li>
+            <li>FastAPI</li>
+            <li>React</li>
+            <li>SQLite</li>
+            <li>VPS / HTTPS</li>
+          </ul>
+          <details class="work-more">
+            <summary>Подробнее</summary>
+            <ul>
+              <li>Пошаговый опрос с лимитом попыток и авто-blacklist</li>
+              <li>Join request / invite, hard ban, уведомления админам</li>
+              <li>Custom title = игровой ник; полный импорт участников</li>
+              <li>Проверка активности через внешний API (op.gg)</li>
+              <li>Админка: участники, blacklist, неактивные, JWT</li>
+            </ul>
+          </details>
+        </div>
+      </article>
+
+      <article class="work reveal" data-work="crm">
+        <div class="work-index">02</div>
+        <div class="work-body">
+          <h3>CRM заявок канала</h3>
+          <p class="work-summary">
+            Бот лидов + канбан-дашборд + файлы + метрики.
+          </p>
+          <ul class="tags">
+            <li>aiogram 3</li>
+            <li>FastAPI</li>
+            <li>Next.js</li>
+            <li>SQLite</li>
+            <li>VPS / HTTPS</li>
+          </ul>
+          <details class="work-more">
+            <summary>Подробнее</summary>
+            <ul>
+              <li>Сценарий заявки: категория → товар → бюджет → сроки</li>
+              <li>Оценка лида, ЛС админу, хранение вложений</li>
+              <li>Дашборд: метрики, канбан drag-and-drop, фильтры, горячие лиды</li>
+              <li>Деплой: systemd, домен, API + dashboard + files</li>
+            </ul>
+          </details>
+        </div>
+      </article>
+    </section>
+
+    <section class="contact" id="contact">
+      <header class="section-head">
+        <h2>Контакт</h2>
+        <p>Задача в одном сообщении: сценарий бота, группа/канал, нужна ли админка, есть ли VPS.</p>
+      </header>
+      <div class="contact-links">
+        <!-- Подставь свои ссылки -->
+        <a class="contact-link" href="https://www.fl.ru/" rel="noopener" target="_blank">FL.ru</a>
+        <a class="contact-link" href="https://t.me/" rel="noopener" target="_blank">Telegram</a>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-foot">
+    <span class="brand-mini">RELAY</span>
+    <span>Telegram-боты · модерация · CRM</span>
+  </footer>
+
+  <script src="main.js"></script>
+</body>
+</html>
