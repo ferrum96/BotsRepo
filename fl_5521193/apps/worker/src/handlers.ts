@@ -7,12 +7,15 @@ import {
 } from '@astrostone/contracts';
 import { deals, type Db } from '@astrostone/db';
 import {
+  AmocrmHttpError,
   finishBatchIfDone,
   jitterSeconds,
   nextOutreachStep,
   parseBatch,
   processImportRow,
   sendOutreachStep,
+  syncContactToAmocrm,
+  type AmocrmPort,
   type MessagingProvider,
   type OutreachConfig,
   type QueuePort,
@@ -24,6 +27,8 @@ export interface HandlerDeps {
   queue: QueuePort;
   providers: Map<ChannelKind, MessagingProvider>;
   config: OutreachConfig;
+  amocrmMode: 'stub' | 'live';
+  amocrm?: AmocrmPort;
   log: (event: string, data: Record<string, unknown>) => void;
 }
 
@@ -45,6 +50,7 @@ export async function handleProcessImportRow(
   const result = await processImportRow(deps.db, deps.queue, payload.rowId);
 
   deps.log('import.row.processed', { rowId: payload.rowId, status: result.status });
+  await finishBatchIfDone(deps.db, result.batchId);
 }
 
 /**
@@ -107,14 +113,29 @@ export async function handleSendOutreach(
 }
 
 /**
- * Синхронизация с amoCRM. На MVP работает через stub-клиент: реальные вызовы
- * включаются вместе с доступом к аккаунту (docs/08-open-questions.md, вопрос 4).
+ * Синхронизация с amoCRM. stub — только лог. live — контакт + сделка, id пишем локально.
  */
 export async function handleSyncAmocrm(
   deps: HandlerDeps,
   payload: { contactId: string; dealId?: string },
 ): Promise<void> {
-  deps.log('amocrm.sync.skipped', { ...payload, reason: 'AMOCRM_MODE=stub' });
+  if (deps.amocrmMode !== 'live' || !deps.amocrm) {
+    deps.log('amocrm.sync.skipped', { ...payload, reason: 'AMOCRM_MODE=stub' });
+    return;
+  }
+
+  try {
+    const result = await syncContactToAmocrm(deps.db, deps.amocrm, payload);
+    deps.log('amocrm.sync.ok', { ...payload, ...result });
+  } catch (error) {
+    deps.log('amocrm.sync.failed', {
+      ...payload,
+      error: error instanceof Error ? error.message : 'unknown',
+    });
+    const status = error instanceof AmocrmHttpError ? error.status : 0;
+    if (status >= 400 && status < 500 && status !== 429) return;
+    throw error;
+  }
 }
 
 export async function handleBatchFinish(

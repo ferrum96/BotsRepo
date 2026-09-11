@@ -1,3 +1,5 @@
+export * from './amocrm/client';
+export * from './amocrm/sync.service';
 export * from './normalization/index';
 export * from './dedup/dedup.service';
 export * from './scoring/scoring';

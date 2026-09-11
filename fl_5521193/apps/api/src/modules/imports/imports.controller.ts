@@ -1,11 +1,11 @@
-import { BadRequestException, Controller, Get, Param, Post, Query, Req } from '@nestjs/common';
+import { BadRequestException, Controller, Get, Inject, Param, Post, Query, Req } from '@nestjs/common';
 import type { FastifyRequest } from 'fastify';
 import { AcquisitionSource, ImportRowStatus } from '@astrostone/contracts';
 import { ImportsService } from './imports.service';
 
 @Controller('imports')
 export class ImportsController {
-  constructor(private readonly imports: ImportsService) {}
+  constructor(@Inject(ImportsService) private readonly imports: ImportsService) {}
 
   @Post()
   async upload(@Req() request: FastifyRequest) {

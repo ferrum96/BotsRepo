@@ -110,7 +110,10 @@ export async function parseBatch(
 
       const row = inserted[0];
       if (!row) return; // строка уже обработана прошлой загрузкой файла
-      if (status !== ImportRowStatus.NORMALIZED) return;
+      if (status !== ImportRowStatus.NORMALIZED) {
+        await bumpBatchCounters(db, batchId, status);
+        return;
+      }
 
       // Джоба на строку, а не на файл: упавшая строка не тянет за собой остальные.
       await queue.enqueue(
@@ -133,11 +136,15 @@ export async function parseBatch(
     payload: { batchId, totalRows: result.totalRows, truncated: result.truncated },
   });
 
+  // Все строки отбракованы на разборе — батч всё равно должен закрыться.
+  await finishBatchIfDone(db, batchId);
+
   return { totalRows: result.totalRows, queued };
 }
 
 export interface ProcessRowResult {
   status: ImportRowStatus;
+  batchId: string;
   contactId?: string;
   dealId?: string;
 }
@@ -153,7 +160,9 @@ export async function processImportRow(
 ): Promise<ProcessRowResult> {
   const [row] = await db.select().from(importRows).where(eq(importRows.id, rowId));
   if (!row) throw new Error(`import row ${rowId} not found`);
-  if (row.status === ImportRowStatus.IMPORTED) return { status: ImportRowStatus.IMPORTED };
+  if (row.status === ImportRowStatus.IMPORTED) {
+    return { status: ImportRowStatus.IMPORTED, batchId: row.batchId };
+  }
 
   const normalized = row.normalizedPayload;
   if (!normalized) throw new Error(`import row ${rowId} has no normalized payload`);
@@ -246,6 +255,7 @@ export async function processImportRow(
 
     return {
       status: finalStatus,
+      batchId: row.batchId,
       contactId: decision.contactId,
       dealId: decision.dealId ?? undefined,
     };
@@ -262,7 +272,7 @@ export async function processImportRow(
 
     await bumpBatchCounters(db, row.batchId, ImportRowStatus.FAILED);
 
-    return { status: ImportRowStatus.FAILED };
+    return { status: ImportRowStatus.FAILED, batchId: row.batchId };
   }
 }
 

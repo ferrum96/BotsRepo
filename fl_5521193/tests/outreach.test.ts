@@ -231,6 +231,20 @@ describe('guard-цепочка', () => {
     }
   });
 
+  it('демо-режим игнорирует окно отправки', async () => {
+    const { dealId } = await seedProspect();
+    const outside = new Date('2026-09-06T01:00:00.000Z');
+
+    const outcome = await sendOutreachStep(
+      db,
+      providers,
+      { dealId, step: OutreachStep.FIRST, now: outside },
+      { ...config, bypassSendWindow: true },
+    );
+
+    expect(outcome.status).toBe('SENT');
+  });
+
   it('контакт без автоканала не получает автоматических сообщений', async () => {
     const { dealId } = await seedProspect({ Имя: 'Анна', Сайт: 'astro-anna.ru' });
 

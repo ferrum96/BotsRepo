@@ -15,29 +15,5 @@ services:
       timeout: 5s
       retries: 10
 
-  api:
-    build:
-      context: .
-      dockerfile: apps/api/Dockerfile
-    env_file: .env
-    environment:
-      DATABASE_URL: postgres://astro:astro@postgres:5432/astrostone
-    ports:
-      - "3000:3000"
-    depends_on:
-      postgres:
-        condition: service_healthy
-
-  worker:
-    build:
-      context: .
-      dockerfile: apps/worker/Dockerfile
-    env_file: .env
-    environment:
-      DATABASE_URL: postgres://astro:astro@postgres:5432/astrostone
-    depends_on:
-      postgres:
-        condition: service_healthy
-
 volumes:
   pgdata:

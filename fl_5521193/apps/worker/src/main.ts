@@ -1,7 +1,13 @@
 import pino from 'pino';
 import { ChannelKind } from '@astrostone/contracts';
 import { createDb, createPool } from '@astrostone/db';
-import { StubMessagingProvider, type MessagingProvider, type OutreachConfig } from '@astrostone/core';
+import {
+  AmocrmClient,
+  StubMessagingProvider,
+  amocrmConfigFromEnv,
+  type MessagingProvider,
+  type OutreachConfig,
+} from '@astrostone/core';
 import { JobName, PgBossQueue } from '@astrostone/queue';
 import {
   handleParseImportBatch,
@@ -30,23 +36,32 @@ async function main(): Promise<void> {
 
   await queue.start();
 
+  const demoMode = process.env.DEMO_MODE === 'true';
+
   const providers = new Map<ChannelKind, MessagingProvider>();
   if ((process.env.MESSAGING_PROVIDER ?? 'stub') === 'stub') {
     providers.set(ChannelKind.TELEGRAM, new StubMessagingProvider(ChannelKind.TELEGRAM));
+    providers.set(ChannelKind.WHATSAPP, new StubMessagingProvider(ChannelKind.WHATSAPP));
+    providers.set(ChannelKind.EMAIL, new StubMessagingProvider(ChannelKind.EMAIL));
     logger.warn('messaging provider = stub: сообщения никуда не уходят');
   }
 
   const config: OutreachConfig = {
     defaultTimezone: process.env.DEFAULT_TIMEZONE ?? 'Europe/Moscow',
-    jitterMinSeconds: Number(process.env.SEND_JITTER_MIN_SECONDS ?? 60),
-    jitterMaxSeconds: Number(process.env.SEND_JITTER_MAX_SECONDS ?? 180),
+    jitterMinSeconds: Number(process.env.SEND_JITTER_MIN_SECONDS ?? (demoMode ? 0 : 60)),
+    jitterMaxSeconds: Number(process.env.SEND_JITTER_MAX_SECONDS ?? (demoMode ? 0 : 180)),
+    bypassSendWindow: demoMode,
   };
+
+  const amocrmConfig = amocrmConfigFromEnv(process.env, 'data/amocrm-tokens.json');
 
   const deps: HandlerDeps = {
     db,
     queue,
     providers,
     config,
+    amocrmMode: process.env.AMOCRM_MODE === 'live' ? 'live' : 'stub',
+    ...(amocrmConfig ? { amocrm: new AmocrmClient(amocrmConfig) } : {}),
     log: (event, data) => logger.info({ event, ...data }),
   };
 

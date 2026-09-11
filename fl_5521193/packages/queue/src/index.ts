@@ -85,3 +85,4 @@ export class PgBossQueue implements QueuePort {
 }
 
 export { JobName };
+export { ImmediateQueue } from './immediate';

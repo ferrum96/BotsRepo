@@ -34,6 +34,8 @@ export interface OutreachConfig {
   defaultTimezone: string;
   jitterMinSeconds: number;
   jitterMaxSeconds: number;
+  /** Демо-стенд: не ждать окна 10:00–19:00, иначе вечерний показ заказчику молчит. */
+  bypassSendWindow?: boolean;
 }
 
 export type SendOutcome =
@@ -149,7 +151,7 @@ export async function sendOutreachStep(
     const timeZone = contact.timezone ?? config.defaultTimezone;
     const window = channel.sendWindow as SendWindow;
 
-    if (!isInsideSendWindow(now, window, timeZone)) {
+    if (!config.bypassSendWindow && !isInsideSendWindow(now, window, timeZone)) {
       return {
         blocked: SendBlockReason.OUTSIDE_SEND_WINDOW,
         retryAt: nextSendWindowStart(now, window, timeZone),

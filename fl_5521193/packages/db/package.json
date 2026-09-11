@@ -13,11 +13,11 @@
   },
   "dependencies": {
     "@astrostone/contracts": "*",
+    "@electric-sql/pglite": "^0.2.15",
     "drizzle-orm": "^0.38.3",
     "pg": "^8.13.1"
   },
   "devDependencies": {
-    "@electric-sql/pglite": "^0.2.15",
     "@types/pg": "^8.11.10",
     "drizzle-kit": "^0.30.1"
   }
