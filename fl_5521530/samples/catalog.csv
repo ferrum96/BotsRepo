@@ -1,0 +1,3 @@
+sku,name,category,description,price,currency,stock,image_url,color
+SKU-TEA,Чёрный чай,Напитки,Крупнолистовой чай,9.90,EUR,20,https://example.com/tea.jpg,black
+SKU-MUG,Кружка,Кухня,Керамическая кружка 300 мл,6.50,EUR,8,,white

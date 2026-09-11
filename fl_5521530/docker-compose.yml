@@ -1,0 +1,50 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: maxbot
+      POSTGRES_USER: maxbot
+      POSTGRES_PASSWORD: maxbot
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U maxbot -d maxbot"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    ports:
+      - "127.0.0.1:5432:5432"
+    restart: unless-stopped
+
+  app:
+    build: .
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://maxbot:maxbot@postgres:5432/maxbot
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  backup:
+    image: postgres:16-alpine
+    profiles: ["backup"]
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_USER: maxbot
+      POSTGRES_PASSWORD: maxbot
+      PGPASSWORD: maxbot
+      POSTGRES_DB: maxbot
+      BACKUP_DIR: /backups
+    volumes:
+      - ./scripts/backup.sh:/scripts/backup.sh:ro
+      - ./backups:/backups
+    depends_on:
+      postgres:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "/scripts/backup.sh"]
+
+volumes:
+  postgres_data:
