@@ -1,4 +1,5 @@
 import { createReadStream } from 'node:fs';
+import { readFile } from 'node:fs/promises';
 import { Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { count, desc, eq, sql } from 'drizzle-orm';
 import {
@@ -27,7 +28,7 @@ import {
 } from '@astrostone/db';
 import { CONFIG, DB } from '../../infrastructure.module';
 import type { AppConfig } from '../../config';
-import { FIXTURE_CSV } from '../../paths';
+import { CRITICAL_DOC, FIXTURE_CSV, TZ_SOURCE } from '../../paths';
 import { ImportsService } from '../imports/imports.service';
 
 const REPLY_BODIES = {
@@ -170,6 +171,25 @@ export class DemoService {
       pipeline,
       recentMessages,
       tasks,
+    };
+  }
+
+  async sources(): Promise<{
+    tz: { filename: string; text: string };
+    csv: { filename: string; text: string };
+    critical: { filename: string; text: string };
+  }> {
+    const clean = (value: string): string =>
+      value.replace(/^\uFEFF/, '').replace(/\r\n/g, '\n').replace(/\r/g, '').replace(/^\n+/, '');
+    const [tz, csv, critical] = await Promise.all([
+      readFile(TZ_SOURCE, 'utf8'),
+      readFile(FIXTURE_CSV, 'utf8'),
+      readFile(CRITICAL_DOC, 'utf8'),
+    ]);
+    return {
+      tz: { filename: 'tz-source.txt', text: clean(tz) },
+      csv: { filename: 'astro-base-sample.csv', text: clean(csv) },
+      critical: { filename: '02-critical.md', text: clean(critical) },
     };
   }
 

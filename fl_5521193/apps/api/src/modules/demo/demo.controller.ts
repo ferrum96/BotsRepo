@@ -10,6 +10,11 @@ export class DemoController {
     return this.demo.snapshot();
   }
 
+  @Get('sources')
+  sources() {
+    return this.demo.sources();
+  }
+
   @Post('reset')
   async reset() {
     await this.demo.reset();

@@ -80,8 +80,15 @@ async function parse<T>(response: Response): Promise<T> {
   return response.json() as Promise<T>;
 }
 
+export interface DemoSources {
+  tz: { filename: string; text: string };
+  csv: { filename: string; text: string };
+  critical: { filename: string; text: string };
+}
+
 export const api = {
   state: () => fetch('/api/demo/state').then((r) => parse<DemoState>(r)),
+  sources: () => fetch('/api/demo/sources').then((r) => parse<DemoSources>(r)),
   runSample: () => fetch('/api/demo/run-sample', { method: 'POST' }).then((r) => parse<{ batchId: string }>(r)),
   reset: () => fetch('/api/demo/reset', { method: 'POST' }).then((r) => parse<{ ok: boolean }>(r)),
   reply: (dealId: string, variant: ReplyVariant) =>

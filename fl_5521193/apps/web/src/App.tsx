@@ -1,8 +1,18 @@
 import { useEffect, useMemo, useState } from 'react';
-import { api, type DemoState, type ReplyVariant } from './api';
+import { api, type DemoSources, type DemoState, type ReplyVariant } from './api';
 import { AUTOMATION, ELIGIBILITY, ROW_STATUS, STAGE } from './labels';
+import { CriticalBrief } from './CriticalBrief';
+import { TzBrief } from './TzBrief';
 
-type Tab = 'stand' | 'import' | 'deals' | 'risks';
+type Tab = 'stand' | 'tz' | 'critical' | 'import' | 'deals' | 'risks';
+
+function parseCsv(text: string): string[][] {
+  return text
+    .split('\n')
+    .map((line) => line.trimEnd())
+    .filter((line) => line.length > 0)
+    .map((line) => line.split(','));
+}
 
 const nameOf = (row: DemoState['pipeline'][number]) =>
   [row.firstName, row.lastName].filter(Boolean).join(' ') || 'без имени';
@@ -10,6 +20,7 @@ const nameOf = (row: DemoState['pipeline'][number]) =>
 export function App() {
   const [tab, setTab] = useState<Tab>('stand');
   const [state, setState] = useState<DemoState | null>(null);
+  const [sources, setSources] = useState<DemoSources | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
@@ -22,11 +33,16 @@ export function App() {
 
   useEffect(() => {
     void refresh().catch((err: Error) => setError(err.message));
+    void api.sources().then(setSources).catch((err: Error) => setError(err.message));
     const id = window.setInterval(() => {
       void refresh().catch(() => undefined);
     }, 1500);
     return () => window.clearInterval(id);
   }, []);
+
+  const csvRows = useMemo(() => (sources ? parseCsv(sources.csv.text) : []), [sources]);
+  const csvHead = csvRows[0] ?? [];
+  const csvBody = csvRows.slice(1);
 
   const demoDeal = useMemo(() => {
     if (!state) return null;
@@ -98,7 +114,9 @@ export function App() {
         {(
           [
             ['stand', 'Стенд'],
-            ['import', 'Импорт'],
+            ['tz', 'ТЗ'],
+            ['critical', 'Критика'],
+            ['import', 'Файл базы'],
             ['deals', 'Сделки'],
             ['risks', 'Почему так'],
           ] as const
@@ -226,28 +244,64 @@ export function App() {
         </div>
       ) : null}
 
+      {tab === 'tz' ? (
+        sources?.tz.text ? <TzBrief text={sources.tz.text} /> : <article className="card">Загружаю ТЗ…</article>
+      ) : null}
+
+      {tab === 'critical' ? <CriticalBrief /> : null}
+
       {tab === 'import' ? (
-        <article className="card">
-          <h2>Строки файла</h2>
-          <table>
-            <thead>
-              <tr>
-                <th>#</th>
-                <th>Статус</th>
-                <th>Ошибка</th>
-              </tr>
-            </thead>
-            <tbody>
-              {state.rows.map((row) => (
-                <tr key={row.rowNumber}>
-                  <td>{row.rowNumber}</td>
-                  <td>{ROW_STATUS[row.status] ?? row.status}</td>
-                  <td>{row.errorMessage ?? '—'}</td>
+        <div className="stack">
+          <article className="card">
+            <h2>Импортируемый файл</h2>
+            <p className="lead">
+              {sources?.csv.filename ?? 'astro-base-sample.csv'}
+              {csvBody.length ? ` · ${csvBody.length} строк` : ''}
+            </p>
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    {csvHead.map((cell) => (
+                      <th key={cell}>{cell}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {csvBody.map((row, index) => (
+                    <tr key={`${row[0] ?? 'row'}-${index}`}>
+                      {csvHead.map((_, col) => (
+                        <td key={`${index}-${col}`}>{row[col] || '—'}</td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </article>
+          <article className="card">
+            <h2>Как система разобрала строки</h2>
+            <table>
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>Статус</th>
+                  <th>Ошибка</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </article>
+              </thead>
+              <tbody>
+                {state.rows.map((row) => (
+                  <tr key={row.rowNumber}>
+                    <td>{row.rowNumber}</td>
+                    <td>{ROW_STATUS[row.status] ?? row.status}</td>
+                    <td>{row.errorMessage ?? '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {state.rows.length === 0 ? <p className="lead">Прогони демо-базу — появятся статусы разбора.</p> : null}
+          </article>
+        </div>
       ) : null}
 
       {tab === 'deals' ? (

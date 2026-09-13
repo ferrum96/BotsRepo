@@ -160,6 +160,38 @@ h1 {
   gap: 16px;
 }
 
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.source {
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 13px;
+  line-height: 1.5;
+  max-height: 72vh;
+  overflow: auto;
+  margin: 12px 0 0;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #1a1611;
+  color: #d9cbb6;
+}
+
+.table-wrap {
+  overflow: auto;
+  max-height: 56vh;
+  margin-top: 10px;
+}
+
+.table-wrap table {
+  min-width: 1100px;
+}
+
 .card {
   padding: 18px;
 }
@@ -258,6 +290,176 @@ th {
 .error {
   color: var(--rose);
   margin-top: 10px;
+}
+
+.brief-count {
+  margin: 14px 0 0;
+  color: var(--gold);
+}
+
+.brief-count b {
+  font-family: Fraunces, serif;
+  font-size: 28px;
+  margin-right: 6px;
+}
+
+.risk-card h3 {
+  margin: 0;
+  font-size: 22px;
+}
+
+.risk-card.blocker {
+  border-color: #7a4a3e;
+  box-shadow: 0 0 0 1px #7a4a3e inset;
+}
+
+.risk-card.important {
+  border-color: #6a5733;
+}
+
+.risk-head {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  margin-bottom: 10px;
+}
+
+.risk-num {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 1px solid var(--gold);
+  color: var(--gold);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  flex: none;
+  margin-top: 2px;
+}
+
+.risk-pills {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+
+.pill.you {
+  color: #f0c8be;
+  border-color: var(--rose);
+  background: #3a241f;
+}
+
+.risk-card p {
+  margin: 0 0 14px;
+  color: #e6dccb;
+  font-size: 17px;
+  line-height: 1.5;
+}
+
+.risk-split {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin: 0;
+}
+
+.risk-split dt {
+  font-family: Fraunces, serif;
+  font-size: 13px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: 6px;
+}
+
+.risk-split dd {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.you-box {
+  background: #32241d;
+  border: 1px solid #6a4538;
+  border-radius: 12px;
+  padding: 12px 14px;
+}
+
+.you-box dt {
+  color: var(--rose);
+}
+
+.you-box dd {
+  color: #f3ddd4;
+}
+
+.tz-card p {
+  margin: 0 0 10px;
+  color: #e6dccb;
+  font-size: 16px;
+  line-height: 1.5;
+}
+
+.tz-card ul {
+  margin: 0 0 12px;
+  padding-left: 20px;
+  color: #d5c8b4;
+}
+
+.tz-card li {
+  margin-bottom: 5px;
+}
+
+.tz-card blockquote {
+  margin: 0 0 12px;
+  padding: 10px 14px;
+  border-left: 3px solid var(--gold);
+  background: #2a2418;
+  color: var(--ink);
+  border-radius: 0 10px 10px 0;
+}
+
+.funnel {
+  list-style: none;
+  margin: 0 0 14px;
+  padding: 0;
+  counter-reset: funnel;
+}
+
+.funnel li {
+  position: relative;
+  margin: 0 0 8px;
+  padding: 8px 12px 8px 40px;
+  background: #1a1611;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  color: var(--ink);
+}
+
+.funnel li::before {
+  counter-increment: funnel;
+  content: counter(funnel);
+  position: absolute;
+  left: 10px;
+  top: 8px;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 1px solid var(--gold);
+  color: var(--gold);
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+
+@media (max-width: 900px) {
+  .risk-split {
+    grid-template-columns: 1fr;
+  }
 }
 
 .risks dt {
