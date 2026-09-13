@@ -93,11 +93,16 @@ h1 {
   flex-wrap: wrap;
 }
 
+.file-btn input {
+  display: none;
+}
+
 .tabs button,
 .ghost,
 .primary,
 .danger,
-.sage {
+.sage,
+.file-btn {
   border: 1px solid var(--line);
   background: transparent;
   color: var(--ink);
@@ -395,6 +400,53 @@ th {
   color: #f3ddd4;
 }
 
+.you-box-wide {
+  grid-column: 1 / -1;
+}
+
+.risk-notes {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid #6a4538;
+}
+
+.risk-notes h4 {
+  margin: 0 0 8px;
+  font-size: 18px;
+  color: #f0c8be;
+}
+
+.risk-notes > p {
+  margin: 0 0 12px;
+  color: #f3ddd4;
+  font-size: 16px;
+}
+
+.risk-notes-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px 20px;
+}
+
+.risk-notes h5 {
+  margin: 0 0 6px;
+  font-size: 13px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--gold);
+}
+
+.risk-notes ul {
+  margin: 0;
+  padding-left: 18px;
+  color: #e6dccb;
+}
+
+.risk-notes li {
+  margin-bottom: 4px;
+  line-height: 1.45;
+}
+
 .tz-card p {
   margin: 0 0 10px;
   color: #e6dccb;
@@ -457,7 +509,8 @@ th {
 
 
 @media (max-width: 900px) {
-  .risk-split {
+  .risk-split,
+  .risk-notes-grid {
     grid-template-columns: 1fr;
   }
 }

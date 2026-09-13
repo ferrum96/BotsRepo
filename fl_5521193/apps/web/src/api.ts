@@ -48,6 +48,7 @@ export interface DemoState {
     preferredChannel: string | null;
     eligibility: string;
     telegram: string | null;
+    isVedicAstrologer: boolean | null;
     managerName: string | null;
     amocrmContactId: number | null;
     amocrmDealId: number | null;
@@ -103,4 +104,10 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ dealId }),
     }).then((r) => parse<{ score: number; rating: string; reasons: string[] }>(r)),
+  upload: (file: File, source = 'PARSING_TELEGRAM') => {
+    const body = new FormData();
+    body.append('file', file);
+    body.append('source', source);
+    return fetch('/api/imports', { method: 'POST', body }).then((r) => parse<{ batchId: string }>(r));
+  },
 };

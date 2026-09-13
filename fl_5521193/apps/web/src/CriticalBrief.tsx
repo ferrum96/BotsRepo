@@ -7,17 +7,6 @@ export function CriticalBrief() {
 
   return (
     <div className="stack">
-      <article className="card">
-        <h2>Что важно понять до договора</h2>
-        <p className="lead">
-          Восемь развилок. Три без вашего решения не стартуют — они сверху и подсвечены. Остальное
-          закрываем в продукте, вам достаточно сути.
-        </p>
-        <p className="brief-count">
-          <b>{blockers}</b> решения за вами · остальное — наша зона
-        </p>
-      </article>
-
       {risks.map((risk) => (
         <article className={`card risk-card ${risk.level}`} key={risk.id}>
           <div className="risk-head">
@@ -37,9 +26,27 @@ export function CriticalBrief() {
               <dd>{risk.weDo}</dd>
             </div>
             {risk.youDo ? (
-              <div className="you-box">
+              <div className={`you-box${risk.notes ? ' you-box-wide' : ''}`}>
                 <dt>Вы</dt>
                 <dd>{risk.youDo}</dd>
+                {risk.notes ? (
+                  <div className="risk-notes">
+                    <h4>{risk.notes.title}</h4>
+                    {risk.notes.lead ? <p>{risk.notes.lead}</p> : null}
+                    <div className="risk-notes-grid">
+                      {risk.notes.sections.map((section) => (
+                        <div key={section.title}>
+                          <h5>{section.title}</h5>
+                          <ul>
+                            {section.items.map((item) => (
+                              <li key={item}>{item}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
               </div>
             ) : null}
           </dl>

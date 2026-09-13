@@ -101,6 +101,25 @@ describe('дедупликация контактов', () => {
     expect(contact?.city).toBe('Москва');
   });
 
+  it('сохраняет признак ведический астролог из файла', async () => {
+    const mapping = mapColumns(['Имя', 'Телефон', 'Ведический астролог']);
+    const normalized = normalizeImportRow(
+      { Имя: 'Анна', Телефон: '+79160001122', 'Ведический астролог': 'да' },
+      { mapping, source: AcquisitionSource.PARSING_TELEGRAM },
+    );
+    const result = await resolveContactAndDeal(db, {
+      row: normalized.row,
+      identifiers: normalized.identifiers,
+      eligibility: normalized.eligibility,
+      preferredChannel: normalized.preferredChannel,
+      importRowId: crypto.randomUUID(),
+      correlationId: crypto.randomUUID(),
+    });
+    const [contact] = await db.select().from(contacts).where(eq(contacts.id, result.contactId));
+    expect(normalized.row.isVedicAstrologer).toBe(true);
+    expect(contact?.isVedicAstrologer).toBe(true);
+  });
+
   it('фиксирует источник повторного попадания', async () => {
     const first = await importRow({ Имя: 'Анна', Телефон: '+79161234567' });
     await importRow({ Имя: 'Анна', Телефон: '+79161234567', Email: 'anna@example.com' }, { source: AcquisitionSource.VK });

@@ -21,7 +21,9 @@
     "dev:api": "npm run dev -w @astrostone/api",
     "dev:worker": "npm run dev -w @astrostone/worker",
     "dev:web": "npm run dev -w @astrostone/web",
-    "demo": "bash scripts/demo.sh"
+    "demo": "bash scripts/demo.sh",
+    "demo:dev": "bash scripts/demo-dev.sh",
+    "amocrm:pipeline": "tsx scripts/amocrm-ensure-pipeline.ts"
   },
   "devDependencies": {
     "@types/node": "^20.19.0",

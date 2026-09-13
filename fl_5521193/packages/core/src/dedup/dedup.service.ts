@@ -116,6 +116,7 @@ const contactValuesFromRow = (row: NormalizedRow, eligibility: AutomationEligibi
   country: row.country,
   specialization: row.specialization,
   comment: row.comment,
+  isVedicAstrologer: row.isVedicAstrologer,
   acquisitionSource: row.acquisitionSource,
   automationEligibility: eligibility,
   preferredChannel: channel,

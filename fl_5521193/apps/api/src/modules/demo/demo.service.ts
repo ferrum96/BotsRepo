@@ -101,6 +101,7 @@ export class DemoService {
           preferredChannel: contacts.preferredChannel,
           eligibility: contacts.automationEligibility,
           telegram: contacts.telegramUsernameRaw,
+          isVedicAstrologer: contacts.isVedicAstrologer,
           managerName: managers.fullName,
           amocrmContactId: contacts.amocrmContactId,
           amocrmDealId: deals.amocrmDealId,

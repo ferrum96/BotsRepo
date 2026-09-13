@@ -134,6 +134,8 @@ export async function handleSyncAmocrm(
     });
     const status = error instanceof AmocrmHttpError ? error.status : 0;
     if (status >= 400 && status < 500 && status !== 429) return;
+    // Пустой поиск / unique / баг разбора не должны валить весь импорт.
+    if (!(error instanceof AmocrmHttpError) || status === 0) return;
     throw error;
   }
 }

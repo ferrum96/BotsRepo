@@ -56,18 +56,36 @@ export function App() {
 
   const selectedDeal = state?.pipeline.find((row) => row.dealId === selected) ?? demoDeal;
 
+  const waitBatch = async () => {
+    for (let i = 0; i < 40; i += 1) {
+      const next = await refresh();
+      if (next.batch?.status === 'DONE') break;
+      await new Promise((resolve) => window.setTimeout(resolve, 700));
+    }
+  };
+
   const run = async () => {
     setBusy(true);
     setError(null);
     try {
       await api.runSample();
-      for (let i = 0; i < 20; i += 1) {
-        const next = await refresh();
-        if (next.batch?.status === 'DONE' && next.stats.messagesSent > 0) break;
-        await new Promise((resolve) => window.setTimeout(resolve, 700));
-      }
+      await waitBatch();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Не удалось прогнать демо');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const uploadFile = async (file: File | undefined) => {
+    if (!file) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await api.upload(file);
+      await waitBatch();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Не удалось загрузить файл');
     } finally {
       setBusy(false);
     }
@@ -100,13 +118,13 @@ export function App() {
             Импорт спарсенной базы, дедуп, первое касание и стоп по любому ответу. Сообщения идут в
             stub. amoCRM: {state.amocrm}
             {state.amocrm === 'live'
-              ? ` · в CRM ушло ${state.stats.amocrmContacts} контактов / ${state.stats.amocrmDeals} сделок.`
+              ? ` · live: поиск дубля в amoCRM, затем create/update. Ушло ${state.stats.amocrmContacts} контактов / ${state.stats.amocrmDeals} сделок.`
               : ' в stub — заказчик видит правила, не спам.'}
           </p>
         </div>
         <div className="banner">
           Канал: {state.messaging}. amoCRM: {state.amocrm}. Telegram-бот первым не пишет — в проде
-          шлюз Wazzup/Radist.
+          Telethon / MTProto с живого аккаунта, не шлюз.
         </div>
       </header>
 
@@ -184,7 +202,26 @@ export function App() {
               <button className="ghost" disabled={busy} onClick={() => void act(() => api.reset())}>
                 Сбросить
               </button>
+              <label className="ghost file-btn">
+                Свой CSV / XLSX
+                <input
+                  type="file"
+                  accept=".csv,.txt,.xlsx,.xlsm"
+                  disabled={busy}
+                  onChange={(event) => {
+                    const file = event.target.files?.[0];
+                    event.target.value = '';
+                    void uploadFile(file);
+                  }}
+                />
+              </label>
             </div>
+            {state.amocrm === 'live' ? (
+              <p className="lead">
+                Сброс чистит только локальную базу. Повторный прогон бьёт в тот же trial amoCRM:
+                дубль не создаётся, пустые поля дописываются, активная сделка не плодится.
+              </p>
+            ) : null}
             {state.batch ? (
               <p className="lead">
                 Файл {state.batch.filename}: {state.batch.status}. Строк {state.batch.totalRows},
@@ -208,6 +245,8 @@ export function App() {
                   {AUTOMATION[selectedDeal.automationStatus]}
                   {selectedDeal.managerName ? ` · ${selectedDeal.managerName}` : ''}
                   {selectedDeal.rating ? ` · рейтинг ${selectedDeal.rating}` : ''}
+                  {selectedDeal.isVedicAstrologer ? ' · Джйотиш' : ''}
+                  {selectedDeal.amocrmContactId ? ` · amo ${selectedDeal.amocrmContactId}` : ''}
                 </p>
                 {selectedDeal.scoreReasons?.length ? (
                   <p className="lead">{selectedDeal.scoreReasons.join('. ')}</p>
@@ -256,6 +295,7 @@ export function App() {
             <p className="lead">
               {sources?.csv.filename ?? 'astro-base-sample.csv'}
               {csvBody.length ? ` · ${csvBody.length} строк` : ''}
+              . Свой файл — кнопка на вкладке «Стенд».
             </p>
             <div className="table-wrap">
               <table>

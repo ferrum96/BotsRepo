@@ -31,6 +31,7 @@ export const contacts = pgTable('contacts', {
   timezone: text('timezone'),
   specialization: text('specialization'),
   comment: text('comment'),
+  isVedicAstrologer: boolean('is_vedic_astrologer'),
   contactType: text('contact_type').notNull().default('POTENTIAL_ASTRO_PARTNER'),
   acquisitionSource: text('acquisition_source').notNull(),
   qualificationStatus: text('qualification_status').notNull().default('NOT_QUALIFIED'),
