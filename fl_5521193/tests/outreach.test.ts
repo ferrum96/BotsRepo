@@ -101,10 +101,33 @@ describe('первое касание', () => {
     expect(outcome.status).toBe('SENT');
     expect(provider.sent).toHaveLength(1);
     expect(provider.sent[0]?.body).toContain('Анна');
+    expect(provider.sent[0]?.body).toContain('практику по астрологии');
     expect(provider.sent[0]?.destination).toBe('@astro_anna');
 
     const [deal] = await db.select().from(deals).where(eq(deals.id, dealId));
     expect(deal?.stage).toBe(AcquisitionStage.FIRST_TOUCH_SENT);
+  });
+
+  it('п. 8: в текст попадают школа и город из карточки', async () => {
+    const { dealId } = await seedProspect({
+      Имя: 'Инна',
+      Telegram: '@inna_stars',
+      'Название школы': 'Школа Беловой',
+      Город: 'Самара',
+    });
+
+    const outcome = await sendOutreachStep(
+      db,
+      providers,
+      { dealId, step: OutreachStep.FIRST, now: insideWindow },
+      config,
+    );
+
+    expect(outcome.status).toBe('SENT');
+    expect(provider.sent[0]?.body).toContain('Инна');
+    expect(provider.sent[0]?.body).toContain('Школа Беловой');
+    expect(provider.sent[0]?.body).toContain('Самара');
+    expect(provider.sent[0]?.body).not.toContain('ведическую астрологию');
   });
 
   it('сохраняет фактический текст сообщения, а не только ссылку на шаблон', async () => {

@@ -4,7 +4,13 @@ import {
   DEFAULT_SCORING_WEIGHTS,
   type QualificationAnswers,
 } from '@astrostone/contracts';
-import { calculateScore, nextOutreachStep, renderTemplate, TemplateRenderError } from '@astrostone/core';
+import {
+  buildOutreachHook,
+  calculateScore,
+  nextOutreachStep,
+  renderTemplate,
+  TemplateRenderError,
+} from '@astrostone/core';
 import { OutreachStep } from '@astrostone/contracts';
 
 const score = (answers: Partial<QualificationAnswers>) =>
@@ -71,6 +77,29 @@ describe('scoring (п. 14 ТЗ)', () => {
     expect(calculateScore(answers, DEFAULT_SCORING_WEIGHTS, { A: 16, B: 10 }, 1).rating).toBe('B');
     expect(calculateScore(answers, DEFAULT_SCORING_WEIGHTS, { A: 20, B: 15 }, 1).rating).toBe('C');
     expect(calculateScore(answers, DEFAULT_SCORING_WEIGHTS, { A: 8, B: 5 }, 1).rating).toBe('A');
+  });
+});
+
+describe('п. 8 хук из карточки', () => {
+  it('школа и город важнее общей фразы про ведическую астрологию', () => {
+    expect(
+      buildOutreachHook({
+        schoolName: 'Школа Джйотиш',
+        city: 'Москва',
+        specialization: 'Джйотиш',
+        isVedicAstrologer: true,
+      }),
+    ).toBe('Увидела ваш проект «Школа Джйотиш» (Москва).');
+  });
+
+  it('без школы берёт канал, потом практику и город', () => {
+    expect(buildOutreachHook({ telegramUrl: 'https://t.me/olga_jyotish', city: 'Казань' })).toBe(
+      'Увидела ваш канал @olga_jyotish (Казань).',
+    );
+    expect(buildOutreachHook({ city: 'Тула', isVedicAstrologer: true })).toBe(
+      'Увидела, что вы практикуете ведическую астрологию (Тула).',
+    );
+    expect(buildOutreachHook({})).toBe('Увидела вашу практику по астрологии.');
   });
 });
 

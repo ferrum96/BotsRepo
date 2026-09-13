@@ -114,13 +114,6 @@ export function App() {
         <div>
           <p className="eyebrow">AstroStone · демо стенд</p>
           <h1>Воронка партнёров без живой рассылки</h1>
-          <p className="lead">
-            Импорт спарсенной базы, дедуп, первое касание и стоп по любому ответу. Сообщения идут в
-            stub. amoCRM: {state.amocrm}
-            {state.amocrm === 'live'
-              ? ` · live: поиск дубля в amoCRM, затем create/update. Ушло ${state.stats.amocrmContacts} контактов / ${state.stats.amocrmDeals} сделок.`
-              : ' в stub — заказчик видит правила, не спам.'}
-          </p>
         </div>
         <div className="banner">
           Канал: {state.messaging}. amoCRM: {state.amocrm}. Telegram-бот первым не пишет — в проде

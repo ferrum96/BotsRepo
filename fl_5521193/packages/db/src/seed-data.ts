@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import {
   ChannelKind,
   DEFAULT_SCORING_THRESHOLDS,
@@ -17,15 +17,16 @@ const TEMPLATES: {
   step: string;
   body: string;
   requiredVariables: string[];
+  fallbacks?: Record<string, string>;
 }[] = [
   {
     code: 'tg_first_touch',
     step: OutreachStep.FIRST,
     body:
-      'Здравствуйте, {{firstName}}! Меня зовут {{managerName}}, AstroStone. ' +
-      'Увидела, что вы практикуете ведическую астрологию. Подскажите, пожалуйста, ' +
-      'используете ли вы в своей практике рекомендации по астрологическим камням?',
-    requiredVariables: ['firstName', 'managerName'],
+      'Здравствуйте, {{firstName}}! Меня зовут {{managerName}}, AstroStone. {{hook}} ' +
+      'Подскажите, пожалуйста, используете ли вы в своей практике рекомендации по астрологическим камням?',
+    requiredVariables: ['firstName', 'managerName', 'hook'],
+    fallbacks: { firstName: 'коллега' },
   },
   {
     code: 'tg_followup_d3',
@@ -107,7 +108,17 @@ export async function seedReferenceData(db: Db): Promise<void> {
       .from(messageTemplates)
       .where(eq(messageTemplates.code, template.code));
 
-    if (existing.length > 0) continue;
+    if (existing[0]) {
+      await db
+        .update(templateVersions)
+        .set({
+          body: template.body,
+          requiredVariables: template.requiredVariables,
+          fallbacks: template.fallbacks ?? {},
+        })
+        .where(and(eq(templateVersions.templateId, existing[0].id), eq(templateVersions.isActive, true)));
+      continue;
+    }
 
     const [created] = await db
       .insert(messageTemplates)
@@ -125,6 +136,7 @@ export async function seedReferenceData(db: Db): Promise<void> {
       version: 1,
       body: template.body,
       requiredVariables: template.requiredVariables,
+      fallbacks: template.fallbacks ?? {},
       isActive: true,
     });
   }

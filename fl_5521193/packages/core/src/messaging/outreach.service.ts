@@ -27,6 +27,7 @@ import {
 } from '@astrostone/db';
 import type { MessagingProvider } from './provider';
 import { isSuppressed } from './suppression';
+import { buildOutreachHook } from './personalize';
 import { TemplateRenderError, renderTemplate } from './template';
 import { isInsideSendWindow, nextSendWindowStart, type SendWindow } from './send-window';
 
@@ -254,6 +255,8 @@ export async function sendOutreachStep(
           managerName: manager?.fullName?.split(' ')[0] ?? null,
           schoolName: contact.schoolName,
           city: contact.city,
+          specialization: contact.specialization,
+          hook: buildOutreachHook(contact),
         },
         {
           requiredVariables: template.requiredVariables,

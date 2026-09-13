@@ -11,6 +11,7 @@ export * from './managers/assignment.service';
 export * from './messaging/provider';
 export * from './messaging/stub.provider';
 export * from './messaging/template';
+export * from './messaging/personalize';
 export * from './messaging/send-window';
 export * from './messaging/suppression';
 export * from './messaging/outreach.service';
