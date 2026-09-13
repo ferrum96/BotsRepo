@@ -212,7 +212,7 @@ DEPLOY_ALL=1 ./deploy/deploy.sh
 | `bb_clan_moderator_bot/dashboard/frontend/` | `bb-clan-api` (+ сборка SPA) |
 | `bb_clan_moderator_bot/dashboard/backend/`, `bot/` | `bb-clan-api`, `bb-clan-bot` |
 | `bb_clan_moderator_bot/alembic/` | `bb-clan-api`, `bb-clan-bot` (+ миграции) |
-| `fl_5521193/` | `astrostone-mvp` (+ venv/pip) |
+| `fl_5521193/` | `astrostone-mvp` (npm ci + сборка web, PGlite demo) |
 | `fkandu_manager_bot/*` | игнор (сервис отключён) |
 | `deploy/webhook.py`, `deploy/systemd/deploy-webhook.service` | `deploy-webhook` |
 | `deploy/ports.env` | рестарт всех активных сервисов |

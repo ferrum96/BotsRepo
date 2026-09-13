@@ -40,7 +40,6 @@ NEEDS_BB_CLAN_FRONTEND_BUILD=false
 NEEDS_BB_CLAN_PIP=false
 NEEDS_BB_CLAN_MIGRATE=false
 NEEDS_ASTROSTONE=false
-NEEDS_ASTROSTONE_VENV=false
 RESTART_SERVICES=()
 CHANGED_FILES=""
 
@@ -59,7 +58,6 @@ mark_all_services() {
   NEEDS_BB_CLAN_PIP=true
   NEEDS_BB_CLAN_MIGRATE=true
   NEEDS_ASTROSTONE=true
-  NEEDS_ASTROSTONE_VENV=true
 }
 
 # Read KEY=value from .env without bash `source` (safe for | @ spaces).
@@ -150,11 +148,8 @@ mark_services_from_file() {
       mark_service_for_restart bb-clan-bot
       ;;
     fl_5521193/*)
-      # Python demo replaced by NestJS (no uvicorn / requirements.txt).
-      # Do not pip-install or restart astrostone-mvp: that would fail the whole
-      # deploy (set -e) and crash-loop the unit. Live process keeps old code
-      # in memory until a manual restart/reboot.
-      echo "AstroStone: NestJS stack not wired to systemd yet — skip astrostone-mvp"
+      NEEDS_ASTROSTONE=true
+      mark_service_for_restart astrostone-mvp
       ;;
     portfolio/*)
       # static site — nginx root, reload via ensure_nginx
@@ -174,7 +169,6 @@ mark_services_from_file() {
       ;;
     deploy/systemd/astrostone-mvp.service)
       NEEDS_ASTROSTONE=true
-      NEEDS_ASTROSTONE_VENV=true
       mark_service_for_restart astrostone-mvp
       ;;
     deploy/systemd/deploy-webhook.service|deploy/webhook.py|deploy/deploy.sh|deploy/webhook.env|deploy/webhook.env.example)
@@ -298,10 +292,10 @@ bootstrap_missing_artifacts() {
     mark_service_for_restart bb-clan-api
   fi
 
-  if [ ! -x "${ASTROSTONE_DIR}/.venv/bin/uvicorn" ]; then
-    echo "Bootstrap: AstroStone venv отсутствует — создаю"
+  if [ ! -d "${ASTROSTONE_DIR}/node_modules" ] \
+    || [ ! -f "${ASTROSTONE_DIR}/apps/web/dist/index.html" ]; then
+    echo "Bootstrap: AstroStone Nest deps/web dist отсутствуют — сборка"
     NEEDS_ASTROSTONE=true
-    NEEDS_ASTROSTONE_VENV=true
     mark_service_for_restart astrostone-mvp
   fi
 
@@ -799,19 +793,24 @@ verify_astrostone_mvp() {
   return 1
 }
 
-ensure_astrostone_venv() {
-  local py
-  py="$(command -v python3.12 || command -v python3)"
-  if [ -z "$py" ]; then
-    echo "AstroStone: python3 не найден"
-    return 1
+ensure_astrostone_demo() {
+  echo "AstroStone: Nest demo (npm + web dist)..."
+  ensure_nodejs || return 1
+
+  if [ ! -f "${ASTROSTONE_DIR}/.env" ]; then
+    cp "${ASTROSTONE_DIR}/.env.example" "${ASTROSTONE_DIR}/.env"
+    echo "AstroStone: создал .env из example (AMOCRM_MODE=stub)"
   fi
-  echo "AstroStone: venv (${py})..."
-  if [ ! -d "${ASTROSTONE_DIR}/.venv" ]; then
-    "$py" -m venv "${ASTROSTONE_DIR}/.venv"
+
+  mkdir -p "${ASTROSTONE_DIR}/data" "${ASTROSTONE_DIR}/uploads"
+  cd "$ASTROSTONE_DIR"
+  if [ -f package-lock.json ]; then
+    npm ci --silent
+  else
+    npm install --silent
   fi
-  "${ASTROSTONE_DIR}/.venv/bin/pip" install -q -U pip
-  "${ASTROSTONE_DIR}/.venv/bin/pip" install -q -r "${ASTROSTONE_DIR}/requirements.txt"
+  npm run build -w @astrostone/web
+  cd "$REPO_DIR"
 }
 
 ensure_backup_deps() {
@@ -905,12 +904,11 @@ else
   echo "BB Clan: без изменений — пропуск сборки"
 fi
 
-if [ -f "${ASTROSTONE_DIR}/requirements.txt" ] && { [ "$NEEDS_ASTROSTONE" = true ] || [ "$NEEDS_ASTROSTONE_VENV" = true ]; }; then
-  echo "AstroStone MVP: обновление..."
-  ensure_astrostone_venv
+if [ "$NEEDS_ASTROSTONE" = true ]; then
+  ensure_astrostone_demo
   mark_service_for_restart astrostone-mvp
 else
-  echo "AstroStone MVP: без изменений или Python demo снят — пропуск"
+  echo "AstroStone: без изменений — пропуск сборки"
 fi
 
 echo ""

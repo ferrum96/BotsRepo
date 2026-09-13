@@ -1,14 +1,18 @@
 [Unit]
-Description=AstroStone Partner Outreach MVP (FastAPI demo)
+Description=AstroStone partner demo (NestJS + PGlite)
 After=network.target
 
 [Service]
 Type=simple
 User=root
 WorkingDirectory=/root/BotsRepo/fl_5521193
-EnvironmentFile=/root/BotsRepo/deploy/ports.env
-Environment=PORT=5521
-ExecStart=/root/BotsRepo/fl_5521193/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 5521
+EnvironmentFile=-/root/BotsRepo/deploy/ports.env
+EnvironmentFile=-/root/BotsRepo/fl_5521193/.env
+Environment=NODE_ENV=production
+Environment=DEMO_MODE=true
+Environment=API_PORT=5521
+Environment=MESSAGING_PROVIDER=stub
+ExecStart=/usr/bin/npm run start -w @astrostone/api
 Restart=always
 RestartSec=5
 
