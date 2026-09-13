@@ -462,16 +462,6 @@ th {
   }
 }
 
-.risks dt {
-  font-family: Fraunces, serif;
-  margin-top: 14px;
-}
-
-.risks dd {
-  margin: 6px 0 0;
-  color: var(--muted);
-}
-
 @media (max-width: 900px) {
   .kpis,
   .grid,

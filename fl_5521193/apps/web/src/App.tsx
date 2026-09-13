@@ -4,7 +4,7 @@ import { AUTOMATION, ELIGIBILITY, ROW_STATUS, STAGE } from './labels';
 import { CriticalBrief } from './CriticalBrief';
 import { TzBrief } from './TzBrief';
 
-type Tab = 'stand' | 'tz' | 'critical' | 'import' | 'deals' | 'risks';
+type Tab = 'stand' | 'tz' | 'critical' | 'import' | 'deals';
 
 function parseCsv(text: string): string[][] {
   return text
@@ -118,7 +118,6 @@ export function App() {
             ['critical', 'Критика'],
             ['import', 'Файл базы'],
             ['deals', 'Сделки'],
-            ['risks', 'Почему так'],
           ] as const
         ).map(([id, label]) => (
           <button key={id} className={tab === id ? 'active' : ''} onClick={() => setTab(id)}>
@@ -358,28 +357,6 @@ export function App() {
         </div>
       ) : null}
 
-      {tab === 'risks' ? (
-        <article className="card risks">
-          <h2>Три разговора с заказчиком</h2>
-          <dl>
-            <dt>Telegram-бот не пишет первым</dt>
-            <dd>
-              Username в базе не даёт права начать чат. На проде — шлюз amoCRM (Wazzup/Radist) с
-              тарифом исходящего. Иначе менеджер шлёт руками из очереди «только вручную».
-            </dd>
-            <dt>Дедуп не в amoCRM</dt>
-            <dd>
-              Поиск amoCRM не нормализует телефоны и упирается в 7 rps. Истина — PostgreSQL,
-              UNIQUE по идентификатору, advisory lock. amoCRM остаётся рабочим столом менеджера.
-            </dd>
-            <dt>Любой ответ гасит серию</dt>
-            <dd>
-              Отменить джобу мало: она уже может выполняться. Перед send — FOR UPDATE по сделке.
-              «Не интересно» и «напишите через месяц» — разные исходы, не один флаг.
-            </dd>
-          </dl>
-        </article>
-      ) : null}
     </div>
   );
 }
