@@ -1,0 +1,4 @@
+# Бренд-ссылки лид-магнита. Меняются здесь, в одном месте — код их подхватывает.
+TG_CHANNEL=https://t.me/han_solopreneur
+COURSE_URL=https://contentmakermp.ru/aiagents
+DASHBOARD_FOOTER=💡 Это лиды только из Telegram. Хотите собирать клиентов и на других площадках — со своими ИИ-агентами? Научим на курсе «AI-агенты для фрилансеров» → https://contentmakermp.ru/aiagents

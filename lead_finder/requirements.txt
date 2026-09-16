@@ -1,0 +1,8 @@
+telethon>=1.34.0,<2.0   # v2 is a breaking rewrite; stay on the stable v1 API
+openpyxl>=3.1.0
+python-dotenv>=1.0.0
+tqdm>=4.66.0
+certifi>=2024.2.2        # корневые сертификаты для HTTPS-запросов к внешним площадкам
+pytest>=8.0.0
+pytest-asyncio>=0.23.0
+pytest-cov>=5.0.0
