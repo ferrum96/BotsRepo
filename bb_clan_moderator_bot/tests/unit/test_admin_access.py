@@ -3,12 +3,15 @@ from unittest.mock import AsyncMock, MagicMock
 
 from telegram.constants import ChatMemberStatus
 
+from bot import messages as msg
 from bot.config import Config
 from bot.database import Database, SurveyProgress
 from bot.handlers.admin import (
     _handle_vetted_group_join,
+    _is_bot_group_invite,
     _mark_recently_left,
     _may_enter_group,
+    _normalize_invite_url,
     _promote_from_completed_survey,
     _recently_left_user_ids,
     _recently_notified_join_ids,
@@ -34,6 +37,13 @@ class _User:
         self.is_bot = False
 
 
+def _invite(url: str, *, primary: bool = False):
+    inv = MagicMock()
+    inv.invite_link = url
+    inv.is_primary = primary
+    return inv
+
+
 def _member_update(
     *,
     user_id: int,
@@ -43,6 +53,7 @@ def _member_update(
     old_tag: Optional[str] = None,
     new_tag: Optional[str] = None,
     actor_id: Optional[int] = None,
+    invite=None,
 ):
     user = _User(user_id)
     old_cm = MagicMock()
@@ -62,6 +73,7 @@ def _member_update(
     chat_member.old_chat_member = old_cm
     chat_member.new_chat_member = new_cm
     chat_member.from_user = _User(actor_id if actor_id is not None else user_id)
+    chat_member.invite_link = invite
     update = MagicMock()
     update.chat_member = chat_member
     return update
@@ -73,6 +85,15 @@ def _admin_command_update(user_id: int = 42):
     update.message = MagicMock()
     update.message.reply_text = AsyncMock()
     return update
+
+
+_SYNC_EMPTY = {
+    "total": 0,
+    "present": 0,
+    "missing": 0,
+    "blacklisted": 0,
+    "errors": 0,
+}
 
 
 async def test_may_enter_group_denies_blacklisted(db: Database, config: Config):
@@ -102,9 +123,49 @@ async def test_may_enter_group_allows_completed_survey(db: Database, config: Con
     assert await _may_enter_group(db, config, 88) is True
 
 
-async def test_may_enter_group_allows_invite_joiner(db: Database, config: Config):
-    """Admin-shared invite: no survey, still allowed (imported on join)."""
-    assert await _may_enter_group(db, config, 999) is True
+async def test_may_enter_group_denies_unvetted_bot_link(db: Database, config: Config):
+    assert await _may_enter_group(db, config, 999) is False
+    assert (
+        await _may_enter_group(
+            db,
+            config,
+            999,
+            invite=_invite(config.telegram_group_link, primary=True),
+        )
+        is False
+    )
+
+
+async def test_may_enter_group_allows_admin_invite_joiner(db: Database, config: Config):
+    """Admin-created extra invite: no survey, still allowed (imported on join)."""
+    assert (
+        await _may_enter_group(
+            db,
+            config,
+            999,
+            invite=_invite("https://t.me/+adminsecret"),
+        )
+        is True
+    )
+
+
+async def test_may_enter_group_allows_admin_added(db: Database, config: Config):
+    assert await _may_enter_group(db, config, 999, added_by_admin=True) is True
+
+
+def test_normalize_invite_url_variants():
+    assert _normalize_invite_url("https://t.me/+AbC") == "+abc"
+    assert _normalize_invite_url("https://t.me/joinchat/AbC") == "+abc"
+    assert _normalize_invite_url("http://telegram.me/joinchat/AbC?x=1") == "+abc"
+
+
+def test_is_bot_group_invite_matches_config_link(config: Config):
+    assert _is_bot_group_invite(
+        _invite("https://t.me/joinchat/testgroup"), config
+    ) is True
+    assert _is_bot_group_invite(_invite("https://t.me/+adminsecret"), config) is False
+    assert _is_bot_group_invite(None, config) is True
+    assert _is_bot_group_invite(_invite("https://t.me/+other", primary=True), config) is True
 
 
 async def test_promote_from_completed_survey(db: Database):
@@ -170,11 +231,13 @@ async def test_reject_blacklisted_join_hard_bans(db: Database, config: Config, m
     ban = AsyncMock(return_value=True)
     monkeypatch.setattr("bot.handlers.admin.ban_user_in_group", ban)
 
-    await _reject_unauthorized_join(MagicMock(), config, db, 300)
+    bot = AsyncMock()
+    await _reject_unauthorized_join(bot, config, db, 300)
 
     ban.assert_awaited_once()
     assert ban.await_args.kwargs["permanent"] is True
     assert 300 not in await db.get_group_member_ids()
+    bot.send_message.assert_not_awaited()
 
 
 async def test_reject_unvetted_join_soft_kicks(db: Database, config: Config, monkeypatch):
@@ -183,11 +246,13 @@ async def test_reject_unvetted_join_soft_kicks(db: Database, config: Config, mon
     ban = AsyncMock(return_value=True)
     monkeypatch.setattr("bot.handlers.admin.ban_user_in_group", ban)
 
-    await _reject_unauthorized_join(MagicMock(), config, db, 301)
+    bot = AsyncMock()
+    await _reject_unauthorized_join(bot, config, db, 301)
 
     ban.assert_awaited_once()
     assert ban.await_args.kwargs["permanent"] is False
     assert 301 not in await db.get_group_member_ids()
+    bot.send_message.assert_awaited_once_with(301, msg.JOIN_REQUIRES_SURVEY)
 
 
 async def test_soft_kick_marks_user_for_blacklist_skip(config: Config, monkeypatch):
@@ -230,7 +295,7 @@ async def test_reject_skips_clan_members(db: Database, config: Config, monkeypat
     ban = AsyncMock(return_value=True)
     monkeypatch.setattr("bot.handlers.admin.ban_user_in_group", ban)
 
-    await _reject_unauthorized_join(MagicMock(), config, db, 302)
+    await _reject_unauthorized_join(AsyncMock(), config, db, 302)
 
     ban.assert_not_called()
     assert 302 in await db.get_group_member_ids()
@@ -487,7 +552,7 @@ async def test_handle_join_prefers_completed_survey_over_invite_import(
     assert await db.get_progress(305) is None
 
 
-async def test_join_request_invite_joiner_approved_and_imported(
+async def test_join_request_admin_invite_approved_and_imported(
     db: Database, mock_context, monkeypatch
 ):
     monkeypatch.setattr(
@@ -515,6 +580,7 @@ async def test_join_request_invite_joiner_approved_and_imported(
     req = MagicMock()
     req.chat.id = GROUP_ID
     req.from_user = user
+    req.invite_link = _invite("https://t.me/+adminsecret")
     update = MagicMock()
     update.chat_join_request = req
     mock_context.bot.approve_chat_join_request = AsyncMock()
@@ -532,6 +598,79 @@ async def test_join_request_invite_joiner_approved_and_imported(
     assert member.game_nick == "invited"
     assert member.real_name == ""
     assert 441 in await db.get_group_member_ids()
+
+
+async def test_join_request_bot_link_without_survey_declined(
+    db: Database, mock_context, config: Config
+):
+    user = _User(443)
+    req = MagicMock()
+    req.chat.id = GROUP_ID
+    req.from_user = user
+    req.invite_link = _invite(config.telegram_group_link, primary=True)
+    update = MagicMock()
+    update.chat_join_request = req
+    mock_context.bot.approve_chat_join_request = AsyncMock()
+    mock_context.bot.decline_chat_join_request = AsyncMock()
+
+    await on_chat_join_request(update, mock_context)
+
+    mock_context.bot.approve_chat_join_request.assert_not_awaited()
+    mock_context.bot.decline_chat_join_request.assert_awaited_once_with(
+        chat_id=GROUP_ID,
+        user_id=443,
+    )
+    mock_context.bot.send_message.assert_awaited_once_with(
+        443, msg.JOIN_REQUIRES_SURVEY
+    )
+    assert await db.is_member(443) is False
+
+
+async def test_join_request_bot_link_after_survey_approved(
+    db: Database, mock_context, config: Config, monkeypatch
+):
+    await db.set_progress(
+        SurveyProgress(
+            user_id=444,
+            step="completed",
+            game_nick="SurveyNick",
+            real_name="Ivan",
+            perspective="FPP",
+        )
+    )
+    monkeypatch.setattr(
+        "bot.handlers.admin.sync_group_members_state",
+        AsyncMock(return_value=_SYNC_EMPTY),
+    )
+    monkeypatch.setattr(
+        "bot.handlers.admin.assign_game_nick_tag", AsyncMock(return_value=True)
+    )
+    monkeypatch.setattr("bot.handlers.admin.check_activity_on_join", AsyncMock())
+    monkeypatch.setattr(
+        "bot.handlers.admin._apply_default_member_permissions",
+        AsyncMock(return_value=True),
+    )
+
+    user = _User(444, username="surveyed", first_name="Ivan")
+    req = MagicMock()
+    req.chat.id = GROUP_ID
+    req.from_user = user
+    req.invite_link = _invite(config.telegram_group_link, primary=True)
+    update = MagicMock()
+    update.chat_join_request = req
+    mock_context.bot.approve_chat_join_request = AsyncMock()
+    mock_context.bot.decline_chat_join_request = AsyncMock()
+
+    await on_chat_join_request(update, mock_context)
+
+    mock_context.bot.decline_chat_join_request.assert_not_awaited()
+    mock_context.bot.approve_chat_join_request.assert_awaited_once_with(
+        chat_id=GROUP_ID,
+        user_id=444,
+    )
+    member = await db.get_member(444)
+    assert member is not None
+    assert member.game_nick == "SurveyNick"
 
 
 async def test_join_request_blacklisted_declines_and_bans(
@@ -633,6 +772,7 @@ async def test_invite_join_imports_member_without_survey(
         user_id=440,
         old_status=ChatMemberStatus.LEFT,
         new_status=ChatMemberStatus.MEMBER,
+        invite=_invite("https://t.me/+adminsecret"),
     )
     await on_chat_member_update(update, mock_context)
 
@@ -643,6 +783,30 @@ async def test_invite_join_imports_member_without_survey(
     assert member.real_name == ""
     assert member.perspective == ""
     assert 440 in await db.get_group_member_ids()
+
+
+async def test_bot_link_join_without_survey_rejected(
+    db: Database, mock_context, config: Config, monkeypatch
+):
+    """TELEGRAM_GROUP_LINK without survey: soft-kick, do not import."""
+    monkeypatch.setattr(
+        "bot.handlers.admin.sync_group_members_state",
+        AsyncMock(return_value=_SYNC_EMPTY),
+    )
+    reject = AsyncMock()
+    monkeypatch.setattr("bot.handlers.admin._reject_unauthorized_join", reject)
+
+    update = _member_update(
+        user_id=445,
+        old_status=ChatMemberStatus.LEFT,
+        new_status=ChatMemberStatus.MEMBER,
+        invite=_invite(config.telegram_group_link, primary=True),
+    )
+    await on_chat_member_update(update, mock_context)
+
+    reject.assert_awaited_once()
+    assert reject.await_args.args[3] == 445
+    assert await db.is_member(445) is False
 
 
 async def test_blacklisted_join_event_still_rejects(
@@ -884,15 +1048,6 @@ def _left_message_update(*, user_id: int, actor_id: int, chat_id: int = GROUP_ID
     update.message.from_user = _User(actor_id)
     update.message.new_chat_members = []
     return update
-
-
-_SYNC_EMPTY = {
-    "total": 0,
-    "present": 0,
-    "missing": 0,
-    "blacklisted": 0,
-    "errors": 0,
-}
 
 
 async def test_voluntary_leave_notifies_admins(

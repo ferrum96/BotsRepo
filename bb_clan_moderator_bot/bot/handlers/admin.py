@@ -287,15 +287,96 @@ def _format_member_line(member) -> str:
     )
 
 
-async def _may_enter_group(db: Database, config: "Config", user_id: int) -> bool:
-    """Allow entry unless blacklisted.
+def _normalize_invite_url(raw: str) -> str:
+    """Compare Telegram invite URLs ignoring scheme/host/joinchat vs +."""
+    value = (raw or "").strip()
+    if not value:
+        return ""
+    lower = value.lower()
+    prefixes = (
+        "https://telegram.me/",
+        "http://telegram.me/",
+        "https://t.me/",
+        "http://t.me/",
+        "telegram.me/",
+        "t.me/",
+    )
+    rest = value
+    for prefix in prefixes:
+        if lower.startswith(prefix):
+            rest = value[len(prefix) :]
+            break
+    rest = rest.split("?")[0].strip("/")
+    if rest.lower().startswith("joinchat/"):
+        token = rest.split("/", 1)[1]
+        rest = f"+{token.lstrip('+')}"
+    return rest.lower()
 
-    Survey completers, existing clan members, bot admins, and people who
-    join via an admin-shared invite link all pass. Invite joiners are
-    written to ``members`` on join so they are not kicked.
+
+def _invite_link_url(invite: object | None) -> str:
+    if invite is None:
+        return ""
+    if isinstance(invite, str):
+        return invite
+    raw = getattr(invite, "invite_link", "")
+    return raw if isinstance(raw, str) else ""
+
+
+def _is_bot_group_invite(invite: object | None, config: "Config") -> bool:
+    """True for TELEGRAM_GROUP_LINK and the group's primary invite.
+
+    Extra admin-created invites (non-primary, different URL) stay open
+    for the no-survey import path. Unknown/missing invite data is gated.
     """
-    del config
-    return not await db.is_blacklisted(user_id)
+    if invite is None:
+        return True
+    if getattr(invite, "is_primary", False) is True:
+        return True
+    incoming = _normalize_invite_url(_invite_link_url(invite))
+    if not incoming:
+        return True
+    bot_url = _normalize_invite_url(config.telegram_group_link)
+    return bool(bot_url and incoming == bot_url)
+
+
+def _is_admin_added(from_user, joining_user_id: int, config: "Config") -> bool:
+    if from_user is None:
+        return False
+    actor_id = getattr(from_user, "id", None)
+    if actor_id is None or actor_id == joining_user_id:
+        return False
+    try:
+        return config.is_admin(int(actor_id))
+    except (TypeError, ValueError):
+        return False
+
+
+async def _may_enter_group(
+    db: Database,
+    config: "Config",
+    user_id: int,
+    *,
+    invite: object | None = None,
+    added_by_admin: bool = False,
+) -> bool:
+    """Allow clan members, survey completers, admins; gate bot invite.
+
+    TELEGRAM_GROUP_LINK / primary invite: only after the bot survey.
+    A different admin-created invite, or a direct add by ADMIN_IDS,
+    still imports without a survey.
+    """
+    if await db.is_blacklisted(user_id):
+        return False
+    if config.is_admin(user_id):
+        return True
+    if await db.is_member(user_id):
+        return True
+    progress = await db.get_progress(user_id)
+    if progress and progress.step == "completed":
+        return True
+    if added_by_admin:
+        return True
+    return not _is_bot_group_invite(invite, config)
 
 
 async def _refresh_member_tg_profile(db: Database, user) -> None:
@@ -461,6 +542,18 @@ async def _reject_unauthorized_join(
     await ban_user_in_group(bot, config, user_id, permanent=False)
     logger.info("Soft-kicked unvetted user %s (can rejoin after survey)", user_id)
     await db.untrack_group_member(user_id)
+    await _notify_join_requires_survey(bot, user_id)
+
+
+async def _notify_join_requires_survey(bot: Bot, user_id: int) -> None:
+    try:
+        await bot.send_message(user_id, msg.JOIN_REQUIRES_SURVEY)
+    except (BadRequest, Forbidden, TelegramError):
+        logger.debug(
+            "Could not DM join-requires-survey to %s",
+            user_id,
+            exc_info=True,
+        )
 
 
 async def _apply_default_member_permissions(
@@ -1071,9 +1164,19 @@ async def on_chat_member_update(
 
     joined_statuses = (ChatMemberStatus.MEMBER, ChatMemberStatus.RESTRICTED)
     if new_status in joined_statuses and old_status not in joined_statuses:
-        if not await _may_enter_group(db, config, user.id):
+        invite = update.chat_member.invite_link
+        added_by_admin = _is_admin_added(
+            update.chat_member.from_user, user.id, config
+        )
+        if not await _may_enter_group(
+            db,
+            config,
+            user.id,
+            invite=invite,
+            added_by_admin=added_by_admin,
+        ):
             logger.info(
-                "Rejecting unauthorized join for user %s (blacklist)",
+                "Rejecting unauthorized join for user %s (survey gate)",
                 user.id,
             )
             await _reject_unauthorized_join(context.bot, config, db, user.id)
@@ -1241,9 +1344,17 @@ async def on_group_membership_message_event(
         for user in update.message.new_chat_members:
             if user.is_bot:
                 continue
-            if not await _may_enter_group(db, config, user.id):
+            added_by_admin = _is_admin_added(
+                update.message.from_user, user.id, config
+            )
+            if not await _may_enter_group(
+                db,
+                config,
+                user.id,
+                added_by_admin=added_by_admin,
+            ):
                 logger.info(
-                    "Rejecting unauthorized fallback join for user %s (blacklist)",
+                    "Rejecting unauthorized fallback join for user %s (survey gate)",
                     user.id,
                 )
                 await _reject_unauthorized_join(context.bot, config, db, user.id)
@@ -1278,7 +1389,7 @@ async def on_group_membership_message_event(
 async def on_chat_join_request(
     update: Update, context: ContextTypes.DEFAULT_TYPE
 ) -> None:
-    """Auto-approve join requests except blacklisted users."""
+    """Approve join requests for vetted users; decline bot-link without survey."""
     req = update.chat_join_request
     if not req:
         return
@@ -1308,9 +1419,10 @@ async def on_chat_join_request(
         await ban_user_in_group(context.bot, config, user.id, permanent=True)
         return
 
-    if not await _may_enter_group(db, config, user.id):
+    invite = getattr(req, "invite_link", None)
+    if not await _may_enter_group(db, config, user.id, invite=invite):
         logger.info(
-            "Join request from user %s declined (blacklist)",
+            "Join request from user %s declined (survey gate)",
             user.id,
         )
         try:
@@ -1323,6 +1435,7 @@ async def on_chat_join_request(
                 "Failed to decline join request for user %s",
                 user.id,
             )
+        await _notify_join_requires_survey(context.bot, user.id)
         return
 
     try:
