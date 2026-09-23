@@ -1,0 +1,86 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: astro
+      POSTGRES_USER: astro
+      POSTGRES_PASSWORD: astro
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U astro -d astro"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    ports:
+      - "127.0.0.1:55432:5432"
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    ports:
+      - "127.0.0.1:56379:6379"
+    restart: unless-stopped
+
+  bot:
+    build: .
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://astro:astro@postgres:5432/astro
+      REDIS_URL: redis://redis:6379/0
+    ports:
+      - "127.0.0.1:8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  backup-cron:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_USER: astro
+      POSTGRES_PASSWORD: astro
+      PGPASSWORD: astro
+      POSTGRES_DB: astro
+      BACKUP_DIR: /backups
+    volumes:
+      - ./scripts/backup.sh:/scripts/backup.sh:ro
+      - ./backups:/backups
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        echo "15 3 * * * /scripts/backup.sh" > /etc/crontabs/root
+        crond -f -l 8
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  backup:
+    image: postgres:16-alpine
+    profiles: ["backup"]
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_USER: astro
+      POSTGRES_PASSWORD: astro
+      PGPASSWORD: astro
+      POSTGRES_DB: astro
+      BACKUP_DIR: /backups
+    volumes:
+      - ./scripts/backup.sh:/scripts/backup.sh:ro
+      - ./backups:/backups
+    depends_on:
+      postgres:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "/scripts/backup.sh"]
+
+volumes:
+  postgres_data:

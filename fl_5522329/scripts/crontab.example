@@ -1,0 +1,3 @@
+# Host cron, if backup-cron container is not used.
+# 03:15 UTC every day, keep dumps in ./backups
+15 3 * * * cd /opt/astro && docker compose run --rm backup

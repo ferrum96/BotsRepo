@@ -1,0 +1,13 @@
+.venv/
+__pycache__/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.env
+backups/*.sql
+backups/*.sql.gz
+miniapp/node_modules/
+miniapp/dist/
+*.pyc
