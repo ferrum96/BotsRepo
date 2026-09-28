@@ -51,6 +51,7 @@ async def _lifespan(app: FastAPI):
             secret_token=settings.webhook_secret or None,
         )
     else:
+        await bot.delete_webhook(drop_pending_updates=False)
         polling = asyncio.create_task(dispatcher.start_polling(bot, handle_signals=False))
     try:
         yield

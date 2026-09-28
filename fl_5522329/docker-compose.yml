@@ -35,6 +35,8 @@ services:
       REDIS_URL: redis://redis:6379/0
     ports:
       - "127.0.0.1:8080:8080"
+    volumes:
+      - ./data/chroma:/app/data/chroma
     depends_on:
       postgres:
         condition: service_healthy

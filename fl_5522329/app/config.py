@@ -41,6 +41,9 @@ class Settings(BaseSettings):
     nominatim_user_agent: str = "astro-telegram-bot/0.1"
     init_data_max_age_seconds: int = Field(default=86400, ge=60)
 
+    sigastra_base_url: str = "https://sigastra.com"
+    horoscope_chroma_path: str = "data/chroma"
+
     @field_validator(
         "bot_token",
         "openrouter_api_key",
@@ -48,12 +51,14 @@ class Settings(BaseSettings):
         "webhook_url",
         "webhook_secret",
         "openrouter_base_url",
+        "sigastra_base_url",
+        "horoscope_chroma_path",
     )
     @classmethod
     def strip_text(cls, value: str) -> str:
         return value.strip()
 
-    @field_validator("openrouter_base_url", "webapp_url", "webhook_url")
+    @field_validator("openrouter_base_url", "webapp_url", "webhook_url", "sigastra_base_url")
     @classmethod
     def strip_trailing_slash(cls, value: str) -> str:
         return value.rstrip("/")

@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import logging
 
+import httpx
 from aiogram import F, Router
 from aiogram.filters import Command, CommandObject
-from aiogram.types import CallbackQuery, Message
+from aiogram.exceptions import TelegramBadRequest
+from aiogram.types import CallbackQuery, LinkPreviewOptions, Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.billing.subscription import user_is_pro
@@ -13,7 +15,8 @@ from app.config import Settings
 from app.db.models import User
 from app.limits.service import TAROT, LimitService
 from app.services import find_by_username, increment_daily_limit, latest_chart
-from app.services.readings import daily_horoscope, monthly_forecast, synastry_text
+from app.horoscope.service import HoroscopeError, build_daily_horoscope
+from app.services.readings import monthly_forecast, synastry_text
 from app.tarot.draw import draw_three, render_spread
 from app.timeutil import msk_today
 
@@ -23,15 +26,32 @@ router = Router(name="readings")
 _NEED_CHART = "Сначала сохрани дату рождения: /profile"
 
 
-async def _send(event: Message | CallbackQuery, text: str, markup=None) -> None:
+async def _send(
+    event: Message | CallbackQuery,
+    text: str,
+    markup=None,
+    parse_mode: str | None = None,
+    *,
+    disable_preview: bool = False,
+) -> None:
     message = event if isinstance(event, Message) else event.message
     if message is None:
         if isinstance(event, CallbackQuery):
             await event.answer()
         return
-    await message.answer(text, reply_markup=markup)
+    preview = LinkPreviewOptions(is_disabled=True) if disable_preview else None
+    await message.answer(text, reply_markup=markup, parse_mode=parse_mode, link_preview_options=preview)
     if isinstance(event, CallbackQuery):
+        await _ack(event)
+
+
+async def _ack(event: Message | CallbackQuery) -> None:
+    if not isinstance(event, CallbackQuery):
+        return
+    try:
         await event.answer()
+    except TelegramBadRequest:
+        return
 
 
 async def _require_chart(event: Message | CallbackQuery, session: AsyncSession, user_id: int):
@@ -50,13 +70,25 @@ async def _require_pro(event: Message | CallbackQuery, session: AsyncSession, us
 
 @router.message(Command("horoscope"))
 @router.callback_query(F.data == "menu:horoscope")
-async def horoscope(event: Message | CallbackQuery, session: AsyncSession, db_user: User | None) -> None:
+async def horoscope(
+    event: Message | CallbackQuery,
+    session: AsyncSession,
+    db_user: User | None,
+    settings: Settings,
+    http_client: httpx.AsyncClient,
+) -> None:
     if db_user is None:
         return
+    await _ack(event)
     row = await _require_chart(event, session, db_user.telegram_id)
     if row is None:
         return
-    await _send(event, daily_horoscope(row))
+    try:
+        text = await build_daily_horoscope(http_client, settings, row)
+    except HoroscopeError as exc:
+        await _send(event, str(exc))
+        return
+    await _send(event, text, parse_mode="HTML", disable_preview=True)
 
 
 @router.message(Command("tarot"))

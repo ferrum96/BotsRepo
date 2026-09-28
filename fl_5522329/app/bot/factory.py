@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 
 from aiogram import Dispatcher, Router
+from aiogram.exceptions import TelegramBadRequest
 from aiogram.fsm.storage.redis import RedisStorage
 from aiogram.types import ErrorEvent
 from redis.asyncio import Redis
@@ -38,6 +39,9 @@ def make_dispatcher(
 
     @dp.error()
     async def on_error(event: ErrorEvent) -> None:
+        if isinstance(event.exception, TelegramBadRequest):
+            logger.info("telegram rejected the reply: %s", event.exception)
+            return
         logger.exception("handler failed", exc_info=event.exception)
         update = event.update
         message = update.message or (update.callback_query.message if update.callback_query else None)

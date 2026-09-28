@@ -11,3 +11,4 @@ backups/*.sql.gz
 miniapp/node_modules/
 miniapp/dist/
 *.pyc
+data/chroma/
